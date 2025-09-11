@@ -534,3 +534,4 @@ def drugsearch(q: str = "", limit: int = 10, live: bool = False) -> dict:
     except Exception as e:
         logger.exception(json.dumps({"event": "radar_error", "q": q, "error": str(e)}))
         return {"query": q, "count": 0, "items": [], "error": str(e)}
+        
