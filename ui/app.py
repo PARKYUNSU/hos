@@ -290,11 +290,12 @@ def simple_image_screening(img: Image.Image) -> List[str]:
         findings.append("저해상도 이미지")
     return findings
 
-def detect_emergency_from_image(img: Image.Image) -> List[str]:
+def detect_emergency_from_image(img: Image.Image, raw_image: bytes = None) -> List[str]:
     reasons: List[str] = []
     red_thr = 0.25
     burn_thr = 0.30
     
+    # 휴리스틱 분석
     try:
         small = img.resize((224, 224))
         hsv = small.convert("HSV")
@@ -313,6 +314,88 @@ def detect_emergency_from_image(img: Image.Image) -> List[str]:
         if orange_ratio > burn_thr:
             reasons.append("이미지상 화상/광범위 홍반 의심")
     except Exception:
+        pass
+    
+    # OpenAI Vision API 분석 (환경변수가 설정된 경우)
+    try:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key and raw_image:
+            import openai
+            client = openai.OpenAI(api_key=api_key)
+            
+            # 이미지를 base64로 인코딩
+            import base64
+            from io import BytesIO
+            
+            img_buffer = BytesIO()
+            img.save(img_buffer, format="JPEG")
+            img_bytes = img_buffer.getvalue()
+            b64_image = base64.b64encode(img_bytes).decode("utf-8")
+            
+            # 의료 이미지 분석 프롬프트
+            prompt = """
+            이 의료/상해 이미지를 분석해주세요. 다음 항목들을 확인하고 발견된 것만 한국어로 보고해주세요:
+            
+            응급상황:
+            - 심한 출혈 (과다 출혈, 대량 출혈)
+            - 심한 화상 (2도 이상 화상, 광범위 화상)
+            - 뼈 노출 (골절, 개방성 골절)
+            - 절단상 (손가락, 팔, 다리 절단)
+            - 중증 외상 (심각한 상처, 깊은 상처)
+            
+            일반 의료상황:
+            - 발진, 알레르기 반응
+            - 부종, 붓기
+            - 멍, 타박상
+            - 가벼운 상처, 찰과상
+            - 피부염, 습진
+            - 물집, 수포
+            
+            발견된 증상이 없으면 "정상"이라고 답해주세요.
+            """
+            
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "당신은 의료 이미지 분석 전문가입니다. 정확하고 신중하게 분석해주세요."
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{b64_image}",
+                                    "detail": "high"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=500,
+                temperature=0.1
+            )
+            
+            analysis = response.choices[0].message.content.strip()
+            
+            # 응급상황 키워드 체크
+            emergency_keywords = ["심한 출혈", "과다 출혈", "대량 출혈", "심한 화상", "2도 이상", "광범위 화상", 
+                                "뼈 노출", "골절", "개방성", "절단", "중증 외상", "심각한 상처", "깊은 상처"]
+            
+            for keyword in emergency_keywords:
+                if keyword in analysis:
+                    reasons.append(f"AI 분석: {analysis}")
+                    break
+            else:
+                # 응급상황이 아닌 경우 일반 의료상황으로 분류
+                if "정상" not in analysis and analysis:
+                    reasons.append(f"AI 분석: {analysis}")
+                    
+    except Exception as e:
+        # OpenAI API 오류 시 휴리스틱 결과만 사용
         pass
     
     return reasons
@@ -525,7 +608,10 @@ if submitted:
             try:
                 img = Image.open(uploaded).convert("RGB")
                 findings = simple_image_screening(img)
-                emg_img = detect_emergency_from_image(img)
+                
+                # 이미지 바이트 데이터 준비
+                img_bytes = uploaded.getvalue()
+                emg_img = detect_emergency_from_image(img, img_bytes)
                 if emg_img:
                     findings.extend(emg_img)
             except Exception:
