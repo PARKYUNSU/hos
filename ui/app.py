@@ -13,6 +13,12 @@ import numpy as np
 import base64
 import json
 import time
+import sys
+from datetime import datetime
+
+# 백엔드 서비스 임포트
+sys.path.append('backend')
+from services_logging import symptom_logger
 
 st.set_page_config(page_title="응급 챗봇", page_icon="🚑", layout="centered")
 st.title("응급 환자 챗봇 (일본)")
@@ -608,9 +614,14 @@ with st.form("chat_form"):
     submitted = st.form_submit_button("상담하기")
 
 if submitted:
+    # 로깅을 위한 시작 시간
+    start_time = time.time()
+    session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
     with st.spinner("분석 중..."):
         # 이미지 분석
         findings = []
+        image_uploaded = uploaded is not None
         if uploaded is not None:
             try:
                 img = Image.open(uploaded).convert("RGB")
@@ -621,8 +632,9 @@ if submitted:
                 emg_img = detect_emergency_from_image(img, img_bytes)
                 if emg_img:
                     findings.extend(emg_img)
-            except Exception:
+            except Exception as e:
                 findings = ["이미지 해석 실패"]
+                st.write(f"🔍 디버깅: 이미지 분석 오류 = {str(e)}")
         
         # 기본 규칙 기반 조언
         rule_out = simple_text_rules(symptoms)
@@ -634,9 +646,13 @@ if submitted:
         st.write(f"🔍 디버깅: 추천 OTC = {otc}")
         
         # RAG 검색
+        rag_results = []
+        rag_confidence = 0.0
         try:
             hits = rag.search(symptoms, top_k=3)
             passages = [h[0] for h in hits]
+            rag_results = hits
+            rag_confidence = max([score for _, score in hits]) if hits else 0.0
             evidence_titles = []
             for txt, _ in hits:
                 first = (txt.strip().splitlines() or [""])[0].strip()
@@ -802,3 +818,35 @@ if submitted:
                                 continue
             
             st.caption("일본 현지 드럭스토어/약국(Matsumoto Kiyoshi, Welcia 등)에서 구매 가능")
+        
+        # 로깅 완료
+        processing_time = time.time() - start_time
+        
+        # 응답 품질 평가
+        advice_quality = "good" if rag_confidence > 0.5 and len(rag_results) > 0 else "poor"
+        
+        # 위치 정보
+        location_coords = None
+        if loc and 'latitude' in loc and 'longitude' in loc:
+            location_coords = (loc['latitude'], loc['longitude'])
+        
+        # 로그 기록
+        try:
+            log_id = symptom_logger.log_symptom(
+                user_input=symptoms,
+                image_uploaded=image_uploaded,
+                rag_results=rag_results,
+                advice_generated=bool(advice),
+                advice_quality=advice_quality,
+                hospital_found=len(nearby_hospitals) > 0,
+                pharmacy_found=len(nearby_pharmacies) > 0,
+                location=location_coords,
+                processing_time=processing_time,
+                session_id=session_id
+            )
+            st.write(f"🔍 디버깅: 로그 ID = {log_id}")
+        except Exception as e:
+            st.write(f"🔍 디버깅: 로깅 오류 = {str(e)}")
+        
+        # 처리 시간 표시
+        st.write(f"🔍 디버깅: 처리 시간 = {processing_time:.2f}초")
