@@ -268,9 +268,14 @@ def simple_text_rules(symptoms_text: str) -> dict:
     if any(k in t for k in ["cut", "bleeding", "상처", "出血"]):
         advice = "상처 부위를 압박하여 지혈하고, 깨끗한 물로 세척 후 멸균 거즈를 적용하세요. 심한 출혈은 즉시 119."
     
-    # 벌레/말벌 쏘임
-    if any(k in t for k in ["벌레", "말벌", "벌", "쏘임", "물림", "벌레에 물림", "말벌에 쏘임", "벌에 쏘임", "insect bite", "wasp sting", "bee sting", "虫に刺された", "蜂に刺された"]):
-        advice = "벌레/말벌 쏘임: 즉시 침을 제거하고, 깨끗한 물로 세척하세요. 얼음찜질로 부종을 완화하고, 항히스타민 연고를 바르세요. 호흡곤란, 전신 두드러기, 의식 변화 시 즉시 119."
+    # 벌레 물림
+    if any(k in t for k in ["벌레", "물림", "벌레에 물림", "벌레에물림", "insect bite", "虫に刺された"]):
+        advice = "벌레 물림: 즉시 해당 부위를 깨끗한 물로 씻고, 얼음찜질로 부종을 완화하세요. 항히스타민 연고를 바르고, 긁지 않도록 주의하세요. 24시간 후에도 개선되지 않으면 의료진 상담하세요."
+        otc.extend(["항히스타민 연고", "소독제", "얼음팩"])
+    
+    # 말벌 쏘임
+    if any(k in t for k in ["말벌", "벌", "쏘임", "말벌에 쏘임", "말벌에쏘임", "벌에 쏘임", "벌에쏘임", "wasp sting", "bee sting", "蜂に刺された"]):
+        advice = "말벌 쏘임: 즉시 침을 제거하고, 깨끗한 물로 세척하세요. 얼음찜질로 부종을 완화하고, 상처 부위를 심장보다 높게 유지하세요. 호흡곤란, 전신 두드러기, 의식 변화 시 즉시 119에 연락하세요."
         otc.extend(["항히스타민 연고", "항히스타민제(경구)", "소독제", "얼음팩"])
     
     return {"advice": advice, "otc": otc}
@@ -634,16 +639,11 @@ if submitted:
                     findings.extend(emg_img)
             except Exception as e:
                 findings = ["이미지 해석 실패"]
-                st.write(f"🔍 디버깅: 이미지 분석 오류 = {str(e)}")
         
         # 기본 규칙 기반 조언
         rule_out = simple_text_rules(symptoms)
         advice = rule_out["advice"]
         otc = rule_out["otc"]
-        
-        # 디버깅 정보
-        st.write(f"🔍 디버깅: 입력된 증상 = '{symptoms}'")
-        st.write(f"🔍 디버깅: 추천 OTC = {otc}")
         
         # RAG 검색
         rag_results = []
@@ -657,11 +657,9 @@ if submitted:
             for txt, _ in hits:
                 first = (txt.strip().splitlines() or [""])[0].strip()
                 evidence_titles.append(first[:80] if first else "근거 문서")
-            st.write(f"🔍 디버깅: RAG 검색 결과 = {len(hits)}개")
         except Exception as e:
             passages = []
             evidence_titles = []
-            st.write(f"🔍 디버깅: RAG 검색 오류 = {str(e)}")
         
         # 지오 검색
         nearby_hospitals = []
@@ -669,21 +667,17 @@ if submitted:
         try:
             if loc and loc.get("latitude") and loc.get("longitude"):
                 lat, lon = loc["latitude"], loc["longitude"]
-                st.write(f"🔍 디버깅: 브라우저 위치 사용 = {lat}, {lon}")
             else:
                 geo = geocode_place(location)
                 if geo:
                     lat, lon = geo["lat"], geo["lon"]
-                    st.write(f"🔍 디버깅: 지오코딩 결과 = {lat}, {lon}")
                 else:
                     lat, lon = 35.676203, 139.650311  # Tokyo fallback
-                    st.write(f"🔍 디버깅: Tokyo 폴백 사용 = {lat}, {lon}")
             
             nearby_hospitals = search_hospitals(lat, lon, 2000)
             nearby_pharmacies = search_pharmacies(lat, lon, 1500)
-            st.write(f"🔍 디버깅: 병원 {len(nearby_hospitals)}개, 약국 {len(nearby_pharmacies)}개 발견")
         except Exception as e:
-            st.write(f"🔍 디버깅: 지오 검색 오류 = {str(e)}")
+            pass
         
         # 응급상황 감지
         emergency_reasons = detect_emergency(symptoms)
@@ -844,9 +838,5 @@ if submitted:
                 processing_time=processing_time,
                 session_id=session_id
             )
-            st.write(f"🔍 디버깅: 로그 ID = {log_id}")
         except Exception as e:
-            st.write(f"🔍 디버깅: 로깅 오류 = {str(e)}")
-        
-        # 처리 시간 표시
-        st.write(f"🔍 디버깅: 처리 시간 = {processing_time:.2f}초")
+            pass

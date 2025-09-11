@@ -84,10 +84,16 @@ def simple_text_rules(symptoms: str) -> Dict[str, any]:
         "화상", "중독", "질식", "쇼크", "심정지", "심장마비"
     ]
     
-    # 벌레 물림/말벌 쏘임 키워드
-    insect_keywords = [
-        "벌레", "물림", "말벌", "쏘임", "벌", "벌레물림", "말벌쏘임",
-        "insect", "bite", "wasp", "sting", "bee"
+    # 벌레 물림 키워드
+    insect_bite_keywords = [
+        "벌레", "물림", "벌레물림", "벌레에물림", "벌레에 물림",
+        "insect", "bite", "bug bite"
+    ]
+    
+    # 말벌 쏘임 키워드
+    wasp_sting_keywords = [
+        "말벌", "쏘임", "말벌쏘임", "말벌에쏘임", "말벌에 쏘임", "벌", "벌에쏘임", "벌에 쏘임",
+        "wasp", "sting", "wasp sting", "bee", "bee sting"
     ]
     
     advice = "조언 증상에 대한 기본 응급처치를 안내합니다. 심각한 증상이면 즉시 119(일본: 119)를 호출하세요."
@@ -98,15 +104,26 @@ def simple_text_rules(symptoms: str) -> Dict[str, any]:
         advice = "🚨 응급상황입니다! 즉시 119에 연락하고 응급실로 가세요."
         return {"advice": advice, "otc": [], "emergency": True}
     
-    # 벌레 물림/말벌 쏘임 특별 처리
-    if any(keyword in symptoms_lower for keyword in insect_keywords):
-        advice = """벌레 물림/말벌 쏘임 응급처치:
+    # 벌레 물림 특별 처리
+    if any(keyword in symptoms_lower for keyword in insect_bite_keywords):
+        advice = """벌레 물림 응급처치:
 1. 즉시 해당 부위를 깨끗한 물로 씻으세요
 2. 얼음팩이나 차가운 물수건으로 부기를 줄이세요
-3. 알레르기 반응(호흡곤란, 두드러기, 현기증)이 있으면 즉시 119에 연락
-4. 벌침이 남아있으면 핀셋으로 제거하세요
-5. 항히스타민 연고나 크림을 바르세요"""
+3. 항히스타민 연고나 크림을 바르세요
+4. 긁지 않도록 주의하세요 (감염 위험)
+5. 24시간 후에도 개선되지 않으면 의료진 상담하세요"""
         otc = ["항히스타민 연고", "소독약", "얼음팩"]
+        return {"advice": advice, "otc": otc, "emergency": False}
+    
+    # 말벌 쏘임 특별 처리
+    if any(keyword in symptoms_lower for keyword in wasp_sting_keywords):
+        advice = """말벌 쏘임 응급처치:
+1. 즉시 침을 제거하세요 (핀셋이나 신용카드 가장자리 사용)
+2. 상처 부위를 깨끗한 물로 씻으세요
+3. 얼음팩이나 차가운 물수건으로 부기를 줄이세요
+4. 상처 부위를 심장보다 높게 유지하세요
+5. 알레르기 반응(호흡곤란, 두드러기, 현기증)이 있으면 즉시 119에 연락"""
+        otc = ["항히스타민 연고", "항히스타민제", "소독약", "얼음팩"]
         return {"advice": advice, "otc": otc, "emergency": False}
     
     # 일반 증상별 조언
