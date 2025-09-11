@@ -115,7 +115,8 @@ def simple_text_rules(symptoms: str) -> Dict[str, any]:
     # 벌레 물림 키워드
     insect_bite_keywords = [
         "벌레", "물림", "벌레물림", "벌레에물림", "벌레에 물림",
-        "insect", "bite", "bug bite"
+        "모기", "모기에물림", "모기에 물림",
+        "insect", "bite", "bug bite", "mosquito"
     ]
     
     # 말벌 쏘임 키워드

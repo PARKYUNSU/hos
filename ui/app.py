@@ -296,7 +296,7 @@ def simple_text_rules(symptoms_text: str) -> dict:
         advice = "상처 부위를 압박하여 지혈하고, 깨끗한 물로 세척 후 멸균 거즈를 적용하세요. 심한 출혈은 즉시 119."
     
     # 벌레 물림 (말벌/벌 키워드 제외)
-    if any(k in t for k in ["벌레", "물림", "벌레에 물림", "벌레에물림", "insect bite", "虫に刺された"]) and not any(k in t for k in ["말벌", "벌", "쏘임", "wasp", "bee", "蜂"]):
+    if any(k in t for k in ["벌레", "물림", "벌레에 물림", "벌레에물림", "모기", "모기에 물림", "모기에물림", "insect bite", "虫に刺された"]) and not any(k in t for k in ["말벌", "벌", "쏘임", "wasp", "bee", "蜂"]):
         advice = "벌레 물림: 즉시 해당 부위를 깨끗한 물로 씻고, 얼음찜질로 부종을 완화하세요. 항히스타민 연고를 바르고, 긁지 않도록 주의하세요. 24시간 후에도 개선되지 않으면 의료진 상담하세요."
         otc.extend(["항히스타민 연고", "소독제", "얼음팩"])
     
@@ -871,7 +871,7 @@ if submitted:
         
         # 위치 정보
         location_coords = None
-        if loc and 'latitude' in loc and 'longitude' in loc:
+        if not test_mode and loc and 'latitude' in loc and 'longitude' in loc:
             location_coords = (loc['latitude'], loc['longitude'])
         
         # 로그 기록
