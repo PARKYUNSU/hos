@@ -104,8 +104,8 @@ def simple_text_rules(symptoms: str) -> Dict[str, any]:
         advice = "🚨 응급상황입니다! 즉시 119에 연락하고 응급실로 가세요."
         return {"advice": advice, "otc": [], "emergency": True}
     
-    # 벌레 물림 특별 처리
-    if any(keyword in symptoms_lower for keyword in insect_bite_keywords):
+    # 벌레 물림 특별 처리 (말벌/벌 키워드 제외)
+    if any(keyword in symptoms_lower for keyword in insect_bite_keywords) and not any(keyword in symptoms_lower for keyword in wasp_sting_keywords):
         advice = """벌레 물림 응급처치:
 1. 즉시 해당 부위를 깨끗한 물로 씻으세요
 2. 얼음팩이나 차가운 물수건으로 부기를 줄이세요
@@ -115,8 +115,8 @@ def simple_text_rules(symptoms: str) -> Dict[str, any]:
         otc = ["항히스타민 연고", "소독약", "얼음팩"]
         return {"advice": advice, "otc": otc, "emergency": False}
     
-    # 말벌 쏘임 특별 처리
-    if any(keyword in symptoms_lower for keyword in wasp_sting_keywords):
+    # 말벌 쏘임 특별 처리 (우선순위 높음)
+    elif any(keyword in symptoms_lower for keyword in wasp_sting_keywords):
         advice = """말벌 쏘임 응급처치:
 1. 즉시 침을 제거하세요 (핀셋이나 신용카드 가장자리 사용)
 2. 상처 부위를 깨끗한 물로 씻으세요
