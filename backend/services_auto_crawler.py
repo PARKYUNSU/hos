@@ -15,7 +15,14 @@ from urllib.parse import quote
 import requests
 from bs4 import BeautifulSoup
 
-from .services_logging import symptom_logger
+try:
+    from .services_logging import symptom_logger
+except ImportError:
+    # Streamlit Cloud에서 상대 import가 실패할 경우를 대비
+    import sys
+    import os
+    sys.path.append(os.path.dirname(__file__))
+    from services_logging import symptom_logger
 
 class AutoCrawler:
     """자동 크롤링 클래스"""

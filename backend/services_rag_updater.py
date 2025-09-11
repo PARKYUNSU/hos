@@ -9,8 +9,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict
 
-from .services_rag import HybridRAG, load_disk_passages
-from .services_logging import symptom_logger
+try:
+    from .services_rag import HybridRAG, load_disk_passages
+    from .services_logging import symptom_logger
+except ImportError:
+    # Streamlit Cloud에서 상대 import가 실패할 경우를 대비
+    import sys
+    import os
+    sys.path.append(os.path.dirname(__file__))
+    from services_rag import HybridRAG, load_disk_passages
+    from services_logging import symptom_logger
 
 class RAGUpdater:
     """RAG 데이터 업데이트 클래스"""
