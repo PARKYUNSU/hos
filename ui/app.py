@@ -262,6 +262,11 @@ def simple_text_rules(symptoms_text: str) -> dict:
     if any(k in t for k in ["cut", "bleeding", "상처", "出血"]):
         advice = "상처 부위를 압박하여 지혈하고, 깨끗한 물로 세척 후 멸균 거즈를 적용하세요. 심한 출혈은 즉시 119."
     
+    # 벌레/말벌 쏘임
+    if any(k in t for k in ["벌레", "말벌", "벌", "쏘임", "물림", "벌레에 물림", "말벌에 쏘임", "벌에 쏘임", "insect bite", "wasp sting", "bee sting", "虫に刺された", "蜂に刺された"]):
+        advice = "벌레/말벌 쏘임: 즉시 침을 제거하고, 깨끗한 물로 세척하세요. 얼음찜질로 부종을 완화하고, 항히스타민 연고를 바르세요. 호흡곤란, 전신 두드러기, 의식 변화 시 즉시 119."
+        otc.extend(["항히스타민 연고", "항히스타민제(경구)", "소독제", "얼음팩"])
+    
     return {"advice": advice, "otc": otc}
 
 # ==================== 응급상황 감지 ====================
@@ -272,6 +277,8 @@ CRITICAL_KEYWORDS = [
     "stroke", "편마비", "脳卒中",
     "difficulty breathing", "숨이 가쁨", "呼吸困難",
     "severe abdominal pain", "복부 극심한 통증", "激しい腹痛",
+    "anaphylaxis", "아나필락시스", "심한 알레르기 반응", "전신 두드러기", "호흡곤란",
+    "severe allergic reaction", "全身蕁麻疹", "呼吸困難",
 ]
 
 def detect_emergency(symptoms_text: str) -> list:
