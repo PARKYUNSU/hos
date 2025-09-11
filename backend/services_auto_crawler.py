@@ -315,3 +315,13 @@ class AutoCrawler:
 
 # 전역 크롤러 인스턴스
 auto_crawler = AutoCrawler()
+
+def auto_crawl_unhandled_symptoms():
+    """미처리 증상에 대해 자동 크롤링을 실행합니다."""
+    try:
+        result = auto_crawler.crawl_unhandled_symptoms()
+        print(f"자동 크롤링 완료: {result['successful']}개 성공, {result['failed']}개 실패")
+        return result
+    except Exception as e:
+        print(f"자동 크롤링 오류: {str(e)}")
+        return {'processed': 0, 'successful': 0, 'failed': 1, 'results': []}
