@@ -106,6 +106,45 @@ def geocode_place(place: str) -> Optional[Dict[str, float]]:
     except Exception:
         return QUICK.get("tokyo") and {"lat": QUICK["tokyo"][0], "lon": QUICK["tokyo"][1]}
 
+def reverse_geocode(lat: float, lon: float) -> str:
+    try:
+        params = {"format": "json", "lat": lat, "lon": lon, "zoom": 18, "addressdetails": 1}
+        r = requests.get(REVERSE_URL, params=params, headers=_headers(), timeout=6)
+        if not r.ok:
+            return ""
+        data = r.json()
+        address = data.get("display_name") or ""
+        return address or ""
+    except Exception:
+        return ""
+
+def build_address_from_tags(tags: Dict[str, str]) -> str:
+    parts: List[str] = []
+    # Common OSM address tags in Japan
+    for key in [
+        "addr:prefecture",
+        "addr:city", 
+        "addr:ward",
+        "addr:district",
+        "addr:suburb",
+        "addr:neighbourhood",
+        "addr:street",
+        "addr:block",
+        "addr:housenumber",
+        "addr:postcode",
+    ]:
+        val = tags.get(key)
+        if val:
+            parts.append(val)
+    if not parts:
+        # fallback single fields
+        for key in ["addr:full", "addr:place", "addr:hamlet"]:
+            val = tags.get(key)
+            if val:
+                parts.append(val)
+                break
+    return " ".join(parts)
+
 def search_hospitals(lat: float, lon: float, radius_m: int = 2000) -> List[Dict]:
     query = f"""
     [out:json][timeout:6];
@@ -135,9 +174,15 @@ def search_hospitals(lat: float, lon: float, radius_m: int = 2000) -> List[Dict]
             name = tags.get("name") or tags.get("name:en") or tags.get("name:ja") or "Unknown"
             lat_out = el.get("lat") or (el.get("center") or {}).get("lat")
             lon_out = el.get("lon") or (el.get("center") or {}).get("lon")
+            
+            # 주소 정보 구성
+            addr = build_address_from_tags(tags)
+            if not addr and lat_out and lon_out:
+                addr = reverse_geocode(lat_out, lon_out)
+            
             results.append({
                 "name": name,
-                "address": tags.get("addr:full", ""),
+                "address": addr or f"위도: {lat_out:.4f}, 경도: {lon_out:.4f}",
                 "lat": lat_out,
                 "lon": lon_out,
             })
@@ -172,9 +217,15 @@ def search_pharmacies(lat: float, lon: float, radius_m: int = 1500) -> List[Dict
             name = tags.get("name") or tags.get("name:en") or tags.get("name:ja") or "Unknown"
             lat_out = el.get("lat") or (el.get("center") or {}).get("lat")
             lon_out = el.get("lon") or (el.get("center") or {}).get("lon")
+            
+            # 주소 정보 구성
+            addr = build_address_from_tags(tags)
+            if not addr and lat_out and lon_out:
+                addr = reverse_geocode(lat_out, lon_out)
+            
             results.append({
                 "name": name,
-                "address": tags.get("addr:full", ""),
+                "address": addr or f"위도: {lat_out:.4f}, 경도: {lon_out:.4f}",
                 "lat": lat_out,
                 "lon": lon_out,
             })
