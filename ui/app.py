@@ -689,7 +689,7 @@ if submitted:
         # 업로드된 이미지 표시
         if uploaded is not None:
             st.subheader("업로드된 이미지")
-            st.image(uploaded, caption="증상 사진", use_column_width=True)
+            st.image(uploaded, caption="증상 사진", use_container_width=True)
         
         if emergency_reasons:
             st.error("위급 신호가 감지되었습니다. 즉시 119로 전화하세요.")
