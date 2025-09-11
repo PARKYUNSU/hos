@@ -73,6 +73,34 @@ DEFAULT_PASSAGES = [
 _disk = load_disk_passages()
 rag = HybridRAG(_disk if _disk else DEFAULT_PASSAGES)
 
+# ==================== 위치 관련 함수 ====================
+def random_tokyo_latlon() -> tuple[float, float]:
+    """도쿄의 랜덤한 지역 좌표를 반환합니다."""
+    import random
+    
+    # 도쿄 주요 지역들의 대표 좌표
+    tokyo_areas = [
+        (35.676203, 139.650311),  # 신주쿠
+        (35.658581, 139.745433),  # 시부야
+        (35.676191, 139.650310),  # 하라주쿠
+        (35.658034, 139.701636),  # 롯폰기
+        (35.676191, 139.650310),  # 긴자
+        (35.658581, 139.745433),  # 아키하바라
+        (35.676191, 139.650310),  # 우에노
+        (35.658034, 139.701636),  # 아사쿠사
+        (35.676191, 139.650310),  # 이케부쿠로
+        (35.658581, 139.745433),  # 신바시
+    ]
+    
+    # 랜덤하게 선택된 지역에 약간의 랜덤 오프셋 추가
+    base_lat, base_lon = random.choice(tokyo_areas)
+    
+    # ±0.01도 범위 내에서 랜덤 오프셋 (약 ±1km)
+    lat_offset = random.uniform(-0.01, 0.01)
+    lon_offset = random.uniform(-0.01, 0.01)
+    
+    return (base_lat + lat_offset, base_lon + lon_offset)
+
 # ==================== 기본 규칙 ====================
 def simple_text_rules(symptoms: str) -> Dict[str, any]:
     symptoms_lower = symptoms.lower()
@@ -506,9 +534,22 @@ st.header("증상 입력")
 with st.form("symptom_form"):
     symptoms = st.text_area("어떤 증상이 있나요?", placeholder="예: 복통, 두통, 벌레에 물렸어요")
     uploaded = st.file_uploader("상처 사진 (선택사항)", type=["jpg", "jpeg", "png"])
-    location = st.text_input("현재 위치(도시/구 단위, 일본)", value="Tokyo")
-    st.write("내 위치 사용(브라우저 권한 필요):")
-    loc = streamlit_geolocation()
+    
+    # 위치 설정 섹션
+    st.subheader("📍 위치 설정")
+    
+    # 테스트 모드 선택
+    test_mode = st.checkbox("🧪 테스트 모드 (랜덤 도쿄 지역)", value=False, 
+                           help="체크하면 도쿄의 랜덤한 지역으로 테스트합니다")
+    
+    if test_mode:
+        st.info("🧪 테스트 모드: 도쿄의 랜덤한 지역에서 병원/약국을 검색합니다")
+        location = "Tokyo (Test Mode)"
+    else:
+        location = st.text_input("현재 위치(도시/구 단위, 일본)", value="Tokyo")
+        st.write("내 위치 사용(브라우저 권한 필요):")
+        loc = streamlit_geolocation()
+    
     traveler = st.checkbox("여행자 모드(한국→일본)", value=True)
     submitted = st.form_submit_button("상담하기")
 
@@ -562,19 +603,29 @@ if submitted:
         nearby_hospitals = []
         nearby_pharmacies = []
         try:
-            if loc and 'latitude' in loc and 'longitude' in loc:
+            if test_mode:
+                # 테스트 모드: 도쿄의 랜덤한 지역 사용
+                lat, lon = random_tokyo_latlon()
+                st.info(f"🧪 테스트 모드: ({lat:.4f}, {lon:.4f}) 위치에서 검색 중...")
+            elif loc and 'latitude' in loc and 'longitude' in loc:
+                # 실제 위치 사용 (브라우저 GPS)
                 lat, lon = loc['latitude'], loc['longitude']
+                st.info(f"📍 실제 위치: ({lat:.4f}, {lon:.4f})")
             else:
+                # 입력된 위치로 검색
                 lat, lon = geocode_place(location)
+                if lat and lon:
+                    st.info(f"📍 검색된 위치: {location} ({lat:.4f}, {lon:.4f})")
+                else:
+                    lat, lon = 35.676203, 139.650311  # Tokyo fallback
+                    st.warning(f"⚠️ 위치 검색 실패, 도쿄 기본 위치 사용: ({lat:.4f}, {lon:.4f})")
             
             # 병원과 약국 검색
             nearby_hospitals = search_hospitals(lat, lon)
             nearby_pharmacies = search_pharmacies(lat, lon)
             
-            st.write(f"🔍 디버깅: 위치 = {lat}, {lon}")
-            st.write(f"🔍 디버깅: 병원 = {len(nearby_hospitals)}개, 약국 = {len(nearby_pharmacies)}개")
         except Exception as e:
-            st.write(f"🔍 디버깅: 지오 검색 오류 = {str(e)}")
+            st.error(f"위치 검색 오류: {str(e)}")
         
         # 응급상황 체크
         emergency_reasons = []
