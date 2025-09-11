@@ -19,6 +19,7 @@ from datetime import datetime
 # 백엔드 서비스 임포트
 sys.path.append('backend')
 from services_logging import symptom_logger
+from services_auto_crawler import auto_crawl_unhandled_symptoms
 
 st.set_page_config(page_title="응급 챗봇", page_icon="🚑", layout="centered")
 st.title("응급 환자 챗봇 (일본)")
@@ -867,7 +868,14 @@ if submitted:
         processing_time = time.time() - start_time
         
         # 응답 품질 평가
-        advice_quality = "good" if rag_confidence > 0.5 and len(rag_results) > 0 else "poor"
+        default_advice = "증상에 대한 기본 응급처치를 안내합니다. 심각한 증상이면 즉시 119(일본: 119)를 호출하세요."
+        is_default_advice = advice.strip() == default_advice.strip()
+        
+        advice_quality = "good" if rag_confidence > 0.5 and len(rag_results) > 0 and not is_default_advice else "poor"
+        
+        # 기본 조언인 경우 실패로 간주
+        if is_default_advice:
+            advice_quality = "failed"
         
         # 위치 정보
         location_coords = None
@@ -890,3 +898,13 @@ if submitted:
             )
         except Exception as e:
             pass
+        
+        # 기본 조언인 경우 자동 크롤링 트리거
+        if is_default_advice:
+            try:
+                st.info("🔍 새로운 증상이 감지되었습니다. 관련 정보를 수집 중입니다...")
+                # 백그라운드에서 자동 크롤링 실행
+                auto_crawl_unhandled_symptoms()
+                st.success("✅ 새로운 의료 정보가 수집되었습니다. 다음에 더 정확한 조언을 제공할 수 있습니다.")
+            except Exception as e:
+                st.warning(f"⚠️ 자동 정보 수집 중 오류가 발생했습니다: {str(e)}")

@@ -764,3 +764,11 @@ if submitted:
         # 처리 시간 표시
         processing_time = time.time() - start_time if 'start_time' in locals() else 0
         st.write(f"🔍 디버깅: 처리 시간 = {processing_time:.2f}초")
+        
+        # 기본 조언 감지 및 알림
+        default_advice = "조언 증상에 대한 기본 응급처치를 안내합니다. 심각한 증상이면 즉시 119(일본: 119)를 호출하세요."
+        is_default_advice = advice.strip() == default_advice.strip()
+        
+        if is_default_advice:
+            st.warning("⚠️ 이 증상에 대한 구체적인 조언이 없습니다. 시스템이 개선될 때까지 기본 응급처치를 따르세요.")
+            st.info("💡 더 정확한 조언을 위해 증상을 더 자세히 설명해주세요.")
