@@ -406,6 +406,99 @@ def map_otc_to_images(otc: list) -> list:
             dedup.append(u)
     return dedup
 
+# ==================== RAD-AR 의약품 검색 ====================
+import re
+import time
+from urllib.parse import urljoin, quote
+from bs4 import BeautifulSoup
+import json
+from pathlib import Path
+
+RADAR_BASE = "https://www.rad-ar.or.jp/siori/english/"
+RADAR_SEARCH_URL = urljoin(RADAR_BASE, "search")
+
+RADAR_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept-Language": "en,ja;q=0.9,ko;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Referer": RADAR_BASE.rstrip("/") + "/",
+}
+
+def radar_session():
+    s = requests.Session()
+    s.headers.update(RADAR_HEADERS)
+    return s
+
+def radar_search(keyword: str, limit: int = 5) -> List[Dict]:
+    try:
+        params = {"w": keyword}
+        s = radar_session()
+        res = s.get(RADAR_SEARCH_URL, params=params, timeout=15)
+        res.raise_for_status()
+        
+        soup = BeautifulSoup(res.text, "lxml")
+        results = []
+        
+        # 검색 결과 링크 파싱
+        links = []
+        for a in soup.select('a[href*="search/result?n="]'):
+            href = a.get("href")
+            if href:
+                full_url = urljoin(RADAR_BASE, href)
+                if full_url not in links:
+                    links.append(full_url)
+        
+        # 상세 정보 가져오기
+        for url in links[:limit]:
+            try:
+                detail_res = s.get(url, timeout=15)
+                detail_res.raise_for_status()
+                detail_soup = BeautifulSoup(detail_res.text, "lxml")
+                
+                # 기본 정보 추출
+                brand = ""
+                h1 = detail_soup.select_one("h1")
+                if h1:
+                    brand = h1.get_text(strip=True)
+                
+                company = ""
+                for a in detail_soup.find_all("a", href=True):
+                    href = a["href"].strip()
+                    if href.startswith("http") and "rad-ar.or.jp" not in href:
+                        company = a.get_text(strip=True)
+                        break
+                
+                # 테이블에서 정보 추출
+                active_ingredient = ""
+                dosage_form = ""
+                for tr in detail_soup.select("table tr"):
+                    cells = tr.find_all(["td", "th"])
+                    if len(cells) >= 2:
+                        key = re.sub(r"\s+", " ", cells[0].get_text(strip=True))
+                        val = cells[1].get_text(strip=True)
+                        if "Active ingredient" in key:
+                            active_ingredient = val
+                        elif "Dosage form" in key:
+                            dosage_form = val
+                
+                results.append({
+                    "brand": brand,
+                    "company": company,
+                    "active_ingredient": active_ingredient,
+                    "dosage_form": dosage_form,
+                    "url": url
+                })
+                
+                time.sleep(0.5)  # 요청 간격
+                
+            except Exception as e:
+                continue
+                
+        return results
+        
+    except Exception as e:
+        return []
+
 # ==================== 메인 앱 ====================
 @st.cache_resource
 def load_rag():
@@ -567,5 +660,42 @@ if submitted:
                 st.subheader("근거 문서")
                 for t in evidence_titles:
                     st.write(f"- {t}")
+            
+            # 의약품 검색 섹션
+            if otc:
+                st.subheader("일본 의약품 정보 검색")
+                drug_keywords = []
+                for o in otc:
+                    if "해열" in o or "acet" in o.lower():
+                        drug_keywords.append("acetaminophen")
+                    elif "지사" in o:
+                        drug_keywords.append("antidiarrheal")
+                    elif "제산" in o or "위산" in o:
+                        drug_keywords.append("antacid")
+                    elif "진통" in o:
+                        drug_keywords.append("analgesic")
+                    elif "항히스타민" in o:
+                        drug_keywords.append("antihistamine")
+                
+                if drug_keywords:
+                    with st.spinner("일본 의약품 정보를 검색 중..."):
+                        for keyword in drug_keywords[:2]:  # 최대 2개 키워드만 검색
+                            try:
+                                drug_results = radar_search(keyword, limit=3)
+                                if drug_results:
+                                    st.write(f"**{keyword} 관련 의약품:**")
+                                    for drug in drug_results:
+                                        with st.expander(f"💊 {drug.get('brand', 'Unknown')}"):
+                                            if drug.get('company'):
+                                                st.write(f"**제조사:** {drug['company']}")
+                                            if drug.get('active_ingredient'):
+                                                st.write(f"**주성분:** {drug['active_ingredient']}")
+                                            if drug.get('dosage_form'):
+                                                st.write(f"**제형:** {drug['dosage_form']}")
+                                            if drug.get('url'):
+                                                st.link_button("상세 정보 보기", drug['url'])
+                            except Exception as e:
+                                st.write(f"의약품 정보 검색 중 오류: {keyword}")
+                                continue
             
             st.caption("일본 현지 드럭스토어/약국(Matsumoto Kiyoshi, Welcia 등)에서 구매 가능")
