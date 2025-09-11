@@ -20,54 +20,15 @@ from datetime import datetime
 sys.path.append('backend')
 from services_logging import symptom_logger
 from services_auto_crawler import auto_crawl_unhandled_symptoms
+from services_advanced_rag import GLOBAL_ADVANCED_RAG, load_disk_passages
 
 st.set_page_config(page_title="응급 챗봇", page_icon="🚑", layout="centered")
 st.title("응급 환자 챗봇 (일본)")
 st.caption("일본 여행자를 위한 응급 의료 조언 - VLM/LLM/RAG 통합")
 
-# ==================== RAG 시스템 ====================
-class HybridRAG:
-    def __init__(self, passages: List[str]):
-        self.passages = passages
-        self.tokenized = [self._tokenize(p) for p in passages]
-        self.bm25 = BM25Okapi(self.tokenized)
-        self.vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=8000)
-        self.tfidf = self.vectorizer.fit_transform(passages)
-
-    def _tokenize(self, text: str) -> List[str]:
-        tokens = re.findall(r'\b\w+\b', text.lower())
-        return tokens
-
-    def search(self, query: str, top_k: int = 5) -> List[Tuple[str, float]]:
-        if not query:
-            return []
-        q_tokens = self._tokenize(query)
-        bm_scores = self.bm25.get_scores(q_tokens)
-        q_vec = self.vectorizer.transform([query])
-        tf_scores = cosine_similarity(q_vec, self.tfidf)[0]
-        scores = [(i, 0.6 * bm_scores[i] + 0.4 * tf_scores[i]) for i in range(len(self.passages))]
-        scores.sort(key=lambda x: x[1], reverse=True)
-        idxs = [i for i, _ in scores[:top_k]]
-        return [(self.passages[i], float(scores[j][1])) for j, i in enumerate(idxs)]
-
-def load_disk_passages() -> list[str]:
-    root = pathlib.Path(__file__).resolve().parents[1]
-    pdir = root / "data" / "passages" / "jp"
-    if not pdir.exists():
-        return []
-    out = []
-    for p in sorted(pdir.glob("*.txt")):
-        try:
-            out.append(p.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-    return out
-
-DEFAULT_PASSAGES = [
-    "熱があるときはぬるま湯で体を冷やし、水分を十分にとりましょう。アセトアミノフェンは比較的安全です。",
-    "出血している傷は直接圧迫で止血し、きれいな水で洗浄後、滅菌ガーゼを当ててください。",
-    "下痢のときは水分・電解質の補給を行ってください。症状が重い場合は受診してください。",
-]
+# ==================== RAG 시스템 (고도화된 시스템 사용) ====================
+# 기존 HybridRAG 클래스는 services_advanced_rag.py로 이동
+# 여기서는 고도화된 RAG 시스템을 사용
 
 # ==================== 지오 서비스 ====================
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -631,8 +592,8 @@ def radar_search(keyword: str, limit: int = 5) -> List[Dict]:
 # ==================== 메인 앱 ====================
 @st.cache_resource
 def load_rag():
-    _disk = load_disk_passages()
-    return HybridRAG(_disk if _disk else DEFAULT_PASSAGES)
+    """고도화된 RAG 시스템 로드"""
+    return GLOBAL_ADVANCED_RAG
 
 # RAG 로드
 rag = load_rag()
@@ -686,21 +647,29 @@ if submitted:
         advice = rule_out["advice"]
         otc = rule_out["otc"]
         
-        # RAG 검색
+        # 고도화된 RAG 검색
         rag_results = []
         rag_confidence = 0.0
         try:
-            hits = rag.search(symptoms, top_k=3)
+            # 고도화된 검색: 쿼리 확장, Dense+Sparse 결합, 리랭킹 포함
+            hits = rag.search(symptoms, top_k=3, use_reranking=True)
             passages = [h[0] for h in hits]
             rag_results = hits
             rag_confidence = max([score for _, score in hits]) if hits else 0.0
             evidence_titles = []
-            for txt, _ in hits:
+            for txt, score in hits:
                 first = (txt.strip().splitlines() or [""])[0].strip()
-                evidence_titles.append(first[:80] if first else "근거 문서")
+                evidence_titles.append(f"{first[:60]}... (신뢰도: {score:.2f})" if first else "근거 문서")
+            
+            # RAG 시스템 통계 표시 (디버깅용)
+            if st.checkbox("🔍 RAG 시스템 통계 보기", value=False):
+                stats = rag.get_search_stats()
+                st.json(stats)
+                
         except Exception as e:
             passages = []
             evidence_titles = []
+            st.error(f"RAG 검색 오류: {str(e)}")
         
         # 지오 검색
         nearby_hospitals = []
