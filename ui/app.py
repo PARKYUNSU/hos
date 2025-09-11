@@ -308,6 +308,53 @@ def map_otc_to_brands(otc: list) -> list:
             out.append(h)
     return out
 
+# ==================== 지도 링크 생성 ====================
+def build_google_maps_link(lat: Optional[float], lon: Optional[float], name: Optional[str] = None) -> Optional[str]:
+    if lat is None or lon is None:
+        return None
+    q = f"{lat},{lon}"
+    if name:
+        q = name
+    return f"https://www.google.com/maps/search/?api=1&query={q}"
+
+# ==================== OTC 이미지 매핑 ====================
+def map_otc_to_images(otc: list) -> list:
+    urls: list = []
+    
+    def add_for(cat: str, placeholder: str) -> None:
+        # 로컬 이미지가 있으면 사용, 없으면 플레이스홀더
+        urls.append(placeholder)
+    
+    for o in otc:
+        lo = o.lower()
+        if ("해열" in o) or ("acet" in lo):
+            add_for("acetaminophen", "💊")
+        if "지사" in o:
+            add_for("antidiarrheal", "💊")
+        if ("제산" in o) or ("위산" in o):
+            add_for("antacid", "💊")
+        if ("가스" in o) or ("시메티콘" in o):
+            add_for("simethicone", "💊")
+        if "항히스타민" in o:
+            add_for("antihistamine", "💊")
+        if ("경구수분보충" in o) or ("ors" in lo):
+            add_for("ors", "💊")
+        if ("로젠지" in o) or ("목염증" in o):
+            add_for("lozenge", "💊")
+        if ("비충혈" in o) or ("decongestant" in lo) or ("디콘제스턴트" in o):
+            add_for("decongestant", "💊")
+        if ("화상" in o) or ("burn" in lo):
+            add_for("burngel", "💊")
+        if ("보습" in o) or ("건조" in o) or ("atopy" in lo) or ("아토피" in o):
+            add_for("emollient", "💊")
+    
+    # 중복 제거
+    dedup: list = []
+    for u in urls:
+        if u not in dedup:
+            dedup.append(u)
+    return dedup
+
 # ==================== 메인 앱 ====================
 @st.cache_resource
 def load_rag():
@@ -382,6 +429,11 @@ if submitted:
                 if any(s in f.lower() for s in ["출혈", "bleeding", "화상", "burn"]):
                     emergency_reasons.append(f)
         
+        # 업로드된 이미지 표시
+        if uploaded is not None:
+            st.subheader("업로드된 이미지")
+            st.image(uploaded, caption="증상 사진", use_column_width=True)
+        
         if emergency_reasons:
             st.error("위급 신호가 감지되었습니다. 즉시 119로 전화하세요.")
             st.write("근거: ", ", ".join(emergency_reasons))
@@ -402,6 +454,15 @@ if submitted:
                 st.subheader("권장 OTC")
                 st.write(", ".join(otc))
                 
+                # OTC 이미지 표시
+                otc_images = map_otc_to_images(otc)
+                if otc_images:
+                    st.caption("대표 이미지")
+                    cols = st.columns(min(4, len(otc_images)))
+                    for i, img in enumerate(otc_images):
+                        with cols[i % len(cols)]:
+                            st.write(img)
+                
                 if traveler:
                     brands = map_otc_to_brands(otc)
                     if brands:
@@ -413,15 +474,43 @@ if submitted:
                     st.subheader("약국에서 보여줄 일본어 문장")
                     st.code(jp_phrase)
             
+            # 병원 정보 표시
             if nearby_hospitals:
                 st.subheader("근처 병원")
                 for h in nearby_hospitals[:5]:
-                    st.write(f"- {h.get('name')} ({h.get('address', '주소 정보 없음')})")
+                    name = h.get('name', 'Unknown')
+                    address = h.get('address', '주소 정보 없음')
+                    lat = h.get('lat')
+                    lon = h.get('lon')
+                    
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.write(f"- **{name}**")
+                        st.write(f"  📍 {address}")
+                    with col2:
+                        if lat and lon:
+                            map_link = build_google_maps_link(lat, lon, name)
+                            if map_link:
+                                st.link_button("🗺️ 지도", map_link)
             
+            # 약국 정보 표시
             if nearby_pharmacies:
                 st.subheader("근처 약국")
                 for p in nearby_pharmacies[:5]:
-                    st.write(f"- {p.get('name')} ({p.get('address', '주소 정보 없음')})")
+                    name = p.get('name', 'Unknown')
+                    address = p.get('address', '주소 정보 없음')
+                    lat = p.get('lat')
+                    lon = p.get('lon')
+                    
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.write(f"- **{name}**")
+                        st.write(f"  📍 {address}")
+                    with col2:
+                        if lat and lon:
+                            map_link = build_google_maps_link(lat, lon, name)
+                            if map_link:
+                                st.link_button("🗺️ 지도", map_link)
             
             if evidence_titles:
                 st.subheader("근거 문서")
