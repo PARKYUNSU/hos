@@ -1,0 +1,22 @@
+sources:
+  - name: fdma_119
+    url: https://www.fdma.go.jp
+    patterns:
+      - "救急"
+      - "応急"
+  - name: mhlw_emergency
+    url: https://www.mhlw.go.jp
+    patterns:
+      - "救急"
+      - "応急"
+      - "家庭でのケア"
+  - name: jrc_first_aid
+    url: https://www.jrc.or.jp
+    patterns:
+      - "応急手当"
+      - "AED"
+  - name: pmda_otc
+    url: https://www.pmda.go.jp
+    patterns:
+      - "一般用"
+      - "医薬品"

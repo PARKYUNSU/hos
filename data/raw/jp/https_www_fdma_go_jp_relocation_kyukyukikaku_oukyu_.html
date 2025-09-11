@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+
+    <title>応急手当WEB講習</title>
+    <meta name="description" content="消防庁が一般市民向けに、救命講習をWEBで提供します。心肺蘇生・AEDの活用などの応急手当を学ぶことができます。">
+    
+    <meta name="robots" content="noarchive">
+    
+	<link rel="shortcut icon" href="img/favicon.ico">
+	<link href="css/reset.css" rel="stylesheet" type="text/css">
+	<link href="css/common_layout.css" rel="stylesheet" type="text/css">
+	<link href="css/top_layout.css" rel="stylesheet" type="text/css">
+	  
+	<!-- jQuery使用に必須 -->
+	<script src="https://code.jquery.com/jquery-2.2.4.min.js"></script>
+	<!-- Cookie使用に必須 -->
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.min.js"></script>
+	
+	<!--　全ページ共通のHTML部品を呼び出すjQuery読み込み　-->
+	<script src="js/common.js"></script>
+
+	<script>
+		$(window).on('load', function (){
+			$('.main-visual ul').each(function(){
+				var sliderWidth = $(this).width();
+
+				$(this).clone(true).insertBefore(this);
+				$(this).clone(true).insertAfter(this);
+
+				$('.main-visual').css('width', sliderWidth*3); // 親要素の横幅を子要素の３倍にする
+			});
+			
+			//主な機能
+			var COOKIE_LASTPATH = $.cookie('cookie_lastPath');
+
+			$.cookie.json = true;
+			//１，受講状況の管理
+			if($.cookie('cookie_lastPath')){
+				//一秒後に実行
+				setTimeout(function(){	move();},500);
+			}
+
+			//前回のパスへ遷移
+			function move(){
+				if(COOKIE_LASTPATH){
+					COOKIE_LASTPATH = COOKIE_LASTPATH.slice(1,-1);
+					if (window.confirm('学習を再開しますか？')) {
+						location.href=COOKIE_LASTPATH;
+					}
+				}
+			}
+		});
+		
+	</script>
+	
+		
+</head>
+	
+	
+	
+	
+	
+<body>
+	<noscript><p>このサイトではJavaScriptを使用したコンテンツ・機能を提供しています。JavaScriptを有効にするとご利用いただけます。</p></noscript>
+	<div id="header_container"></div>
+	
+	<main>
+		
+		<div class="wrap">
+		<div class="main-visual">
+			<ul>
+				<li><img src="img/top/slide1.png" alt=""></li>
+				<li><img src="img/top/slide2.png" alt=""></li>
+				<li><img src="img/top/slide3.png" alt=""></li>
+				<li><img src="img/top/slide4.png" alt=""></li>
+				<li><img src="img/top/slide5.png" alt=""></li>
+			</ul>
+		</div>
+		</div>
+		
+		<p class="explanation">
+			<span>目の前で誰かが倒れてしまったとき、<br>あなたは助けることができますか？</span><br>
+			特別な資格がなくても、誰にでも行えるのが応急手当です。<br>
+			万が一の緊急事態に備えて、適切な応急手当を学び、<br>日頃から身につけておきましょう。
+		</p>
+		
+		<div class="button">
+			<ul class="container">
+				<li><a href="01futsu/01oukyuteate-manabi/01_01_00.html"><img src="img/top/button1.png" alt=""><p>普通救命講習編</p></a></li>
+				<li><a href="02jokyu/01oukyuteate-manabi/02_01_00.html"><img src="img/top/button2.png" alt=""><p>上級救命講習編</p></a></li>
+				<li><a href="03hajimete/03_00.html"><img src="img/top/button3.png" alt=""><p>はじめての応急手当編</p></a></li>
+				<li><a href="04covid/04_00.html"><img src="img/top/button4.png" alt=""><p>新型コロナウイルス感染症の流行を踏まえた救急蘇生法編</p></a></li>
+				<li><a href="05kobetsu/index.html"><img src="img/top/button5.png" alt=""><p>個別動画閲覧</p></a></li>
+				<li><a href="07qa/index.html"><img src="img/top/button6.png" alt=""><p>Q&amp;A</p></a></li>
+			</ul>
+		</div>
+		
+		
+	</main>
+	
+	<div id="footer_container"></div>
+	
+	<div id="script_container"></div>
+
+</body>
+</html>
