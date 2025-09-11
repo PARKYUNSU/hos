@@ -622,6 +622,10 @@ if submitted:
         advice = rule_out["advice"]
         otc = rule_out["otc"]
         
+        # 디버깅 정보
+        st.write(f"🔍 디버깅: 입력된 증상 = '{symptoms}'")
+        st.write(f"🔍 디버깅: 추천 OTC = {otc}")
+        
         # RAG 검색
         try:
             hits = rag.search(symptoms, top_k=3)
@@ -630,9 +634,11 @@ if submitted:
             for txt, _ in hits:
                 first = (txt.strip().splitlines() or [""])[0].strip()
                 evidence_titles.append(first[:80] if first else "근거 문서")
-        except Exception:
+            st.write(f"🔍 디버깅: RAG 검색 결과 = {len(hits)}개")
+        except Exception as e:
             passages = []
             evidence_titles = []
+            st.write(f"🔍 디버깅: RAG 검색 오류 = {str(e)}")
         
         # 지오 검색
         nearby_hospitals = []
@@ -640,17 +646,21 @@ if submitted:
         try:
             if loc and loc.get("latitude") and loc.get("longitude"):
                 lat, lon = loc["latitude"], loc["longitude"]
+                st.write(f"🔍 디버깅: 브라우저 위치 사용 = {lat}, {lon}")
             else:
                 geo = geocode_place(location)
                 if geo:
                     lat, lon = geo["lat"], geo["lon"]
+                    st.write(f"🔍 디버깅: 지오코딩 결과 = {lat}, {lon}")
                 else:
                     lat, lon = 35.676203, 139.650311  # Tokyo fallback
+                    st.write(f"🔍 디버깅: Tokyo 폴백 사용 = {lat}, {lon}")
             
             nearby_hospitals = search_hospitals(lat, lon, 2000)
             nearby_pharmacies = search_pharmacies(lat, lon, 1500)
-        except Exception:
-            pass
+            st.write(f"🔍 디버깅: 병원 {len(nearby_hospitals)}개, 약국 {len(nearby_pharmacies)}개 발견")
+        except Exception as e:
+            st.write(f"🔍 디버깅: 지오 검색 오류 = {str(e)}")
         
         # 응급상황 감지
         emergency_reasons = detect_emergency(symptoms)
