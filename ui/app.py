@@ -268,26 +268,8 @@ def simple_text_rules(symptoms_text: str) -> dict:
         advice = "말벌 쏘임: 즉시 침을 제거하고, 깨끗한 물로 세척하세요. 얼음찜질로 부종을 완화하고, 상처 부위를 심장보다 높게 유지하세요. 호흡곤란, 전신 두드러기, 의식 변화 시 즉시 119에 연락하세요."
         otc.extend(["항히스타민 연고", "항히스타민제(경구)", "소독제", "얼음팩"])
     
-    # LLM을 사용한 고급 조언 생성 (API 키가 있는 경우)
-    try:
-        # RAG 검색 결과 준비
-        rag_passages = []
-        if 'hits' in locals() and hits:
-            rag_passages = [hit[0] for hit in hits[:3]]  # 상위 3개 문서
-
-        # 이미지 분석 결과 준비 (간단한 버전)
-        image_findings = []
-        if 'uploaded_file' in locals() and uploaded_file:
-            image_findings = ["이미지 분석됨"] # Placeholder, actual image analysis is in main.py
-
-        # LLM 조언 생성
-        if rag_passages or image_findings:
-            llm_advice = generate_advice(symptoms_text, image_findings, rag_passages)
-            if llm_advice and not llm_advice.startswith("증상에 대한 일반 조언입니다"):
-                advice = llm_advice
-    except Exception as e:
-        # LLM 오류 시 기본 조언 사용
-        pass
+    # simple_text_rules는 이제 기본 규칙만 처리
+    # RAG + LLM은 메인 함수에서 처리됨
 
     
     # ==================== LLM 기반 자동 생성 규칙 ====================
@@ -717,21 +699,19 @@ if submitted:
             except Exception as e:
                 findings = ["이미지 해석 실패"]
         
-        # 기본 규칙 기반 조언
-        rule_out = simple_text_rules(symptoms)
-        advice = rule_out["advice"]
-        otc = rule_out["otc"]
-        
-        # 고도화된 RAG 검색
+        # 통합된 RAG + LLM 조언 생성
         rag_results = []
         rag_confidence = 0.0
+        evidence_titles = []
+        
         try:
-            # 고도화된 검색: 쿼리 확장, Dense+Sparse 결합, 리랭킹 포함
+            # 고도화된 RAG 검색: 쿼리 확장, Dense+Sparse 결합, 리랭킹 포함
             hits = rag.search(symptoms, top_k=3, use_reranking=True)
             passages = [h[0] for h in hits]
             rag_results = hits
             rag_confidence = max([score for _, score in hits]) if hits else 0.0
-            evidence_titles = []
+            
+            # 근거 문서 제목 생성
             for txt, score in hits:
                 first = (txt.strip().splitlines() or [""])[0].strip()
                 evidence_titles.append(f"{first[:60]}... (신뢰도: {score:.2f})" if first else "근거 문서")
@@ -745,6 +725,27 @@ if submitted:
             passages = []
             evidence_titles = []
             st.error(f"RAG 검색 오류: {str(e)}")
+        
+        # LLM을 사용한 고급 조언 생성 (RAG 결과 활용)
+        try:
+            # 이미지 분석 결과 준비
+            image_findings = findings if findings else []
+            
+            # LLM 조언 생성 (RAG 결과와 이미지 분석 결과 활용)
+            llm_advice = generate_advice(symptoms, image_findings, passages)
+            if llm_advice and not llm_advice.startswith("증상에 대한 일반 조언입니다"):
+                advice = llm_advice
+                otc = []  # LLM이 조언을 생성하면 OTC는 LLM이 결정
+            else:
+                # LLM이 실패하면 기본 규칙 사용
+                rule_out = simple_text_rules(symptoms)
+                advice = rule_out["advice"]
+                otc = rule_out["otc"]
+        except Exception as e:
+            # LLM 오류 시 기본 규칙 사용
+            rule_out = simple_text_rules(symptoms)
+            advice = rule_out["advice"]
+            otc = rule_out["otc"]
         
         # 지오 검색
         nearby_hospitals = []
@@ -865,9 +866,15 @@ if submitted:
                                 st.link_button("🗺️ 지도", map_link)
             
             if evidence_titles:
-                st.subheader("근거 문서")
+                st.subheader(f"근거 문서 (최고 신뢰도: {rag_confidence:.1%})")
                 for t in evidence_titles:
                     st.write(f"- {t}")
+                
+                # RAG 성능 상태 표시
+                if rag_confidence < 0.7:
+                    st.warning(f"⚠️ RAG 신뢰도가 낮습니다 ({rag_confidence:.1%}). 더 정확한 정보를 수집 중입니다.")
+                else:
+                    st.success(f"✅ RAG 신뢰도가 양호합니다 ({rag_confidence:.1%})")
             
             # 의약품 검색 섹션
             if otc:
@@ -915,11 +922,15 @@ if submitted:
         default_advice = "증상에 대한 기본 응급처치를 안내합니다. 심각한 증상이면 즉시 119(일본: 119)를 호출하세요."
         is_default_advice = advice.strip() == default_advice.strip()
         
-        advice_quality = "good" if rag_confidence > 0.5 and len(rag_results) > 0 and not is_default_advice else "poor"
+        # RAG 성능 평가 (70% 기준으로 상향 조정)
+        advice_quality = "good" if rag_confidence > 0.7 and len(rag_results) > 0 and not is_default_advice else "poor"
         
         # 기본 조언인 경우 실패로 간주
         if is_default_advice:
             advice_quality = "failed"
+        
+        # RAG 신뢰도가 70% 미만인 경우도 크롤링 대상으로 간주
+        needs_crawling = is_default_advice or rag_confidence < 0.7
         
         # 위치 정보
         location_coords = None
@@ -943,10 +954,14 @@ if submitted:
         except Exception as e:
             pass
         
-        # 기본 조언인 경우 자동 크롤링 트리거
-        if is_default_advice:
+        # RAG 성능이 부족한 경우 자동 크롤링 트리거
+        if needs_crawling:
             try:
-                st.info("🔍 새로운 증상이 감지되었습니다. 관련 정보를 수집 중입니다...")
+                if is_default_advice:
+                    st.info("🔍 새로운 증상이 감지되었습니다. 관련 정보를 수집 중입니다...")
+                else:
+                    st.info(f"🔍 RAG 신뢰도가 낮습니다 ({rag_confidence:.1%}). 더 정확한 정보를 수집 중입니다...")
+                
                 # 백그라운드에서 자동 크롤링 실행
                 auto_crawl_unhandled_symptoms()
                 st.success("✅ 새로운 의료 정보가 수집되었습니다. 다음에 더 정확한 조언을 제공할 수 있습니다.")

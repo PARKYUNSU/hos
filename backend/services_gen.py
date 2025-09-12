@@ -22,9 +22,20 @@ def get_client() -> Optional[OpenAI]:
 
 
 SYSTEM_PROMPT = (
-    "당신은 해외 응급 환자를 돕는 안전 중심 챗봇입니다. 의료적 진단을 내리지 않고,"
-    "일본의 일반 의약품(OTC)과 기본 응급처치, 그리고 119 연락 권고를 중심으로 조언하세요."
-    " 모든 출력은 한국어로 제공하세요. 금기/주의, 119 기준을 명확히 표기하세요."
+    "당신은 일본 여행자를 위한 전문 응급 의료 챗봇입니다. "
+    "다음 원칙을 따라 조언하세요:\n\n"
+    "1. **의료적 진단 금지**: 진단하지 않고 응급처치와 OTC 조언만 제공\n"
+    "2. **일본 의료 시스템 특화**: 일본의 119, 약국, 병원 시스템에 맞춘 조언\n"
+    "3. **안전 우선**: 위험한 증상은 즉시 119 호출 권고\n"
+    "4. **실용적 조언**: 일본 약국에서 구매 가능한 OTC 약품 추천\n"
+    "5. **한국어 출력**: 모든 조언을 한국어로 제공\n"
+    "6. **금기사항 명시**: 영유아, 임산부, 기저질환자 주의사항 포함\n"
+    "7. **RAG 문서 활용**: 제공된 일본 의료 문서를 참고하여 정확한 조언 제공\n\n"
+    "조언 형식:\n"
+    "- 응급처치 방법\n"
+    "- 권장 OTC 약품 (일본 약국명 포함)\n"
+    "- 119 호출 기준\n"
+    "- 주의사항 및 금기사항"
 )
 
 
@@ -38,11 +49,16 @@ def generate_advice(symptoms: str, findings: List[str], passages: List[str], ima
         return base
 
     text_block = (
-        "다음 정보를 바탕으로 안전 중심의 응급처치/OTC 조언을 제공하세요."
-        " 반드시 금기/주의(영유아, 임산부, 기저질환) 포함, 119 호출 기준 명시.\n"
-        f"증상: {symptoms}\n"
-        f"이미지 단서(모델 추정 아님, 사용자 입력 기반): {', '.join(findings) if findings else '없음'}\n"
-        f"참고문헌:\n- " + "\n- ".join(passages)
+        "다음 정보를 바탕으로 일본 여행자를 위한 전문 응급처치/OTC 조언을 제공하세요.\n\n"
+        f"**증상**: {symptoms}\n"
+        f"**이미지 분석 결과**: {', '.join(findings) if findings else '없음'}\n\n"
+        f"**일본 의료 문서 참고자료**:\n" + 
+        ("\n".join([f"- {passage[:200]}..." for passage in passages]) if passages else "참고 문서 없음") + "\n\n"
+        "위 정보를 종합하여 다음 형식으로 조언하세요:\n"
+        "1. 응급처치 방법\n"
+        "2. 일본 약국 OTC 약품 추천 (약국명 포함)\n"
+        "3. 119 호출 기준\n"
+        "4. 주의사항 및 금기사항"
     )
 
     content: List[dict] = [{"type": "text", "text": text_block}]
@@ -55,14 +71,17 @@ def generate_advice(symptoms: str, findings: List[str], passages: List[str], ima
             }
         )
 
+    # 모델 선택: 이미지가 있으면 gpt-4o, 없으면 gpt-4o-mini
+    model = "gpt-4o" if image_bytes else "gpt-4o-mini"
+    
     completion = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": content},
         ],
         temperature=0.2,
-        max_tokens=350,
+        max_tokens=500,  # 더 상세한 조언을 위해 토큰 수 증가
     )
     return completion.choices[0].message.content or ""
 
