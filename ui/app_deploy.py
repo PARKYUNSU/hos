@@ -41,7 +41,10 @@ OVERPASS_URLS = [
 REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 
 def _headers() -> Dict[str, str]:
-    contact = os.getenv("CONTACT_EMAIL", "hos-emergency-bot/0.1")
+    try:
+        contact = st.secrets.get("CONTACT_EMAIL", "hos-emergency-bot/0.1")
+    except:
+        contact = os.getenv("CONTACT_EMAIL", "hos-emergency-bot/0.1")
     return {"User-Agent": f"hos-emergency-bot/0.1 ({contact})"}
 
 def geocode_place(place: str) -> Optional[Dict[str, float]]:
@@ -400,7 +403,7 @@ def detect_emergency_from_image(img: Image.Image, raw_image: bytes = None) -> Li
     
     # OpenAI Vision API 분석 (환경변수가 설정된 경우)
     try:
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = st.secrets.get("OPENAI_API_KEY")
         if api_key and raw_image:
             import openai
             client = openai.OpenAI(api_key=api_key)

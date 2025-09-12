@@ -2,10 +2,16 @@ import os
 from typing import List, Optional
 import base64
 from openai import OpenAI
+import streamlit as st
 
 
 def get_client() -> Optional[OpenAI]:
-    api_key = os.getenv("OPENAI_API_KEY")
+    # Streamlit Cloud에서는 st.secrets 사용, 로컬에서는 os.getenv 사용
+    try:
+        api_key = st.secrets.get("OPENAI_API_KEY")
+    except:
+        api_key = os.getenv("OPENAI_API_KEY")
+    
     if not api_key:
         return None
     try:
