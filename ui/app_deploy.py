@@ -19,62 +19,101 @@ from datetime import datetime
 # 백엔드 서비스 임포트 (배포용 - 로깅 제외)
 sys.path.append('backend')
 # from services_logging import symptom_logger
+# from services_auto_crawler import auto_crawl_unhandled_symptoms
+from services_advanced_rag import GLOBAL_ADVANCED_RAG, load_disk_passages
 from services_gen import generate_advice
 
 st.set_page_config(page_title="응급 챗봇", page_icon="🚑", layout="centered")
 st.title("응급 환자 챗봇 (일본)")
 st.caption("일본 여행자를 위한 응급 의료 조언 - VLM/LLM/RAG 통합")
 
-# ==================== RAG 시스템 ====================
-class HybridRAG:
-    def __init__(self, passages: List[str]):
-        self.passages = passages
-        self.tokenized = [self._tokenize(p) for p in passages]
-        self.bm25 = BM25Okapi(self.tokenized)
-        self.vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=8000)
-        self.tfidf = self.vectorizer.fit_transform(passages)
+# ==================== RAG 시스템 (고도화된 시스템 사용) ====================
+# 기존 HybridRAG 클래스는 services_advanced_rag.py로 이동
+# 여기서는 고도화된 RAG 시스템을 사용
 
-    def _tokenize(self, text: str) -> List[str]:
-        tokens = re.findall(r'\b\w+\b', text.lower())
-        return tokens
-
-    def search(self, query: str, top_k: int = 5) -> List[Tuple[str, float]]:
-        if not query:
-            return []
-        q_tokens = self._tokenize(query)
-        bm_scores = self.bm25.get_scores(q_tokens)
-        q_vec = self.vectorizer.transform([query])
-        tf_scores = cosine_similarity(q_vec, self.tfidf)[0]
-        scores = [(i, 0.6 * bm_scores[i] + 0.4 * tf_scores[i]) for i in range(len(self.passages))]
-        scores.sort(key=lambda x: x[1], reverse=True)
-        idxs = [i for i, _ in scores[:top_k]]
-        return [(self.passages[i], float(scores[j][1])) for j, i in enumerate(idxs)]
-
-def load_disk_passages() -> list[str]:
-    root = pathlib.Path(__file__).resolve().parents[1]
-    pdir = root / "data" / "passages" / "jp"
-    if not pdir.exists():
-        return []
-    out = []
-    for p in sorted(pdir.glob("*.txt")):
-        try:
-            out.append(p.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-    return out
-
-DEFAULT_PASSAGES = [
-    "熱があるときはぬるま湯で体を冷やし、水分を十分にとりましょう。アセトアミノフェンは比較的安全です。",
-    "出血している傷は直接圧迫で止血し、きれいな水で洗浄後、滅菌ガーゼを当ててください。",
-    "下痢のときは水分・電解質の補給を行ってください。症状が重い場合は受診してください。",
-    "벌레 물림이나 말벌 쏘임의 경우, 즉시 해당 부위를 깨끗한 물로 씻고, 얼음팩으로 부기를 줄이세요. 알레르기 반응이 있으면 즉시 의료진에게 연락하세요.",
-    "응급상황에서는 즉시 119에 연락하고, 환자를 안전한 곳으로 이동시키세요. 의식이 없으면 심폐소생술을 시도하세요."
+# ==================== 지오 서비스 ====================
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
 ]
+REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 
-_disk = load_disk_passages()
-rag = HybridRAG(_disk if _disk else DEFAULT_PASSAGES)
+def _headers() -> Dict[str, str]:
+    contact = os.getenv("CONTACT_EMAIL", "hos-emergency-bot/0.1")
+    return {"User-Agent": f"hos-emergency-bot/0.1 ({contact})"}
 
-# ==================== 위치 관련 함수 ====================
+def geocode_place(place: str) -> Optional[Dict[str, float]]:
+    if not place:
+        return None
+    QUICK: Dict[str, Tuple[float, float]] = {
+        "shibuya": (35.661777, 139.704051),
+        "tokyo": (35.676203, 139.650311),
+        "japan": (36.204824, 138.252924),
+    }
+    key = (place or "").strip().lower()
+    if key in QUICK:
+        lat, lon = QUICK[key]
+        return {"lat": lat, "lon": lon}
+    params = {
+        "q": place,
+        "format": "json",
+        "limit": 1,
+        "addressdetails": 0,
+    }
+    try:
+        r = requests.get(NOMINATIM_URL, params=params, headers=_headers(), timeout=6)
+        if not r.ok:
+            return None
+        arr = r.json()
+        if not arr:
+            return None
+        lat = float(arr[0]["lat"])
+        lon = float(arr[0]["lon"])
+        return {"lat": lat, "lon": lon}
+    except Exception:
+        return QUICK.get("tokyo") and {"lat": QUICK["tokyo"][0], "lon": QUICK["tokyo"][1]}
+
+def reverse_geocode(lat: float, lon: float) -> str:
+    try:
+        params = {"format": "json", "lat": lat, "lon": lon, "zoom": 18, "addressdetails": 1}
+        r = requests.get(REVERSE_URL, params=params, headers=_headers(), timeout=6)
+        if not r.ok:
+            return ""
+        data = r.json()
+        address = data.get("display_name") or ""
+        return address or ""
+    except Exception:
+        return ""
+
+def build_address_from_tags(tags: Dict[str, str]) -> str:
+    parts: List[str] = []
+    # Common OSM address tags in Japan
+    for key in [
+        "addr:prefecture",
+        "addr:city", 
+        "addr:ward",
+        "addr:district",
+        "addr:suburb",
+        "addr:neighbourhood",
+        "addr:street",
+        "addr:block",
+        "addr:housenumber",
+        "addr:postcode",
+    ]:
+        val = tags.get(key)
+        if val:
+            parts.append(val)
+    if not parts:
+        # fallback single fields
+        for key in ["addr:full", "addr:place", "addr:hamlet"]:
+            val = tags.get(key)
+            if val:
+                parts.append(val)
+                break
+    return " ".join(parts)
+
 def random_tokyo_latlon() -> tuple[float, float]:
     """도쿄의 랜덤한 지역 좌표를 반환합니다."""
     import random
@@ -102,440 +141,541 @@ def random_tokyo_latlon() -> tuple[float, float]:
     
     return (base_lat + lat_offset, base_lon + lon_offset)
 
+def search_hospitals(lat: float, lon: float, radius_m: int = 2000) -> List[Dict]:
+    query = f"""
+    [out:json][timeout:6];
+    (
+      node["amenity"~"hospital|clinic"](around:{radius_m},{lat},{lon});
+      way["amenity"~"hospital|clinic"](around:{radius_m},{lat},{lon});
+      relation["amenity"~"hospital|clinic"](around:{radius_m},{lat},{lon});
+    );
+    out center 20;
+    """
+    r = None
+    for endpoint in OVERPASS_URLS:
+        try:
+            r = requests.post(endpoint, data={"data": query}, timeout=7)
+            if r.ok:
+                break
+        except Exception:
+            r = None
+            continue
+    if r is None:
+        return []
+    results: List[Dict] = []
+    if r.ok:
+        data = r.json()
+        for el in data.get("elements", [])[:20]:
+            tags = el.get("tags", {})
+            name = tags.get("name") or tags.get("name:en") or tags.get("name:ja") or "Unknown"
+            lat_out = el.get("lat") or (el.get("center") or {}).get("lat")
+            lon_out = el.get("lon") or (el.get("center") or {}).get("lon")
+            
+            # 주소 정보 구성
+            addr = build_address_from_tags(tags)
+            if not addr and lat_out and lon_out:
+                addr = reverse_geocode(lat_out, lon_out)
+            
+            results.append({
+                "name": name,
+                "address": addr or f"위도: {lat_out:.4f}, 경도: {lon_out:.4f}",
+                "lat": lat_out,
+                "lon": lon_out,
+            })
+    return results
+
+def search_pharmacies(lat: float, lon: float, radius_m: int = 1500) -> List[Dict]:
+    query = f"""
+    [out:json][timeout:7];
+    (
+      node["amenity"="pharmacy"](around:{radius_m},{lat},{lon});
+      way["amenity"="pharmacy"](around:{radius_m},{lat},{lon});
+      relation["amenity"="pharmacy"](around:{radius_m},{lat},{lon});
+    );
+    out center 30;
+    """
+    r = None
+    for endpoint in OVERPASS_URLS:
+        try:
+            r = requests.post(endpoint, data={"data": query}, timeout=7)
+            if r.ok:
+                break
+        except Exception:
+            r = None
+            continue
+    if r is None:
+        return []
+    results: List[Dict] = []
+    if r.ok:
+        data = r.json()
+        for el in data.get("elements", [])[:30]:
+            tags = el.get("tags", {})
+            name = tags.get("name") or tags.get("name:en") or tags.get("name:ja") or "Unknown"
+            lat_out = el.get("lat") or (el.get("center") or {}).get("lat")
+            lon_out = el.get("lon") or (el.get("center") or {}).get("lon")
+            
+            # 주소 정보 구성
+            addr = build_address_from_tags(tags)
+            if not addr and lat_out and lon_out:
+                addr = reverse_geocode(lat_out, lon_out)
+            
+            results.append({
+                "name": name,
+                "address": addr or f"위도: {lat_out:.4f}, 경도: {lon_out:.4f}",
+                "lat": lat_out,
+                "lon": lon_out,
+            })
+    return results
+
 # ==================== 기본 규칙 ====================
-def simple_text_rules(symptoms: str) -> Dict[str, any]:
-    symptoms_lower = symptoms.lower()
+def simple_text_rules(symptoms_text: str) -> dict:
+    t = (symptoms_text or "").lower()
+    advice = "증상에 대한 기본 응급처치를 안내합니다. 심각한 증상이면 즉시 119(일본: 119)를 호출하세요."
+    otc: list = []
     
-    # 응급상황 키워드
-    emergency_keywords = [
-        "의식없", "의식 없", "호흡곤란", "호흡 곤란", "심한출혈", "심한 출혈",
-        "가슴통증", "가슴 통증", "심한복통", "심한 복통", "경련", "발작",
-        "화상", "중독", "질식", "쇼크", "심정지", "심장마비"
-    ]
+    if any(k in t for k in ["fever", "열", "発熱"]):
+        otc.append("해열제(아세트아미노펜)")
+    if any(k in t for k in ["cough", "기침", "咳"]):
+        otc.append("진해거담제")
+    if any(k in t for k in ["diarrhea", "설사", "下痢"]):
+        otc.append("지사제 및 수분보충")
+    if any(k in t for k in ["abdominal pain", "stomach ache", "배아픔", "복통", "腹痛"]):
+        otc.extend(["제산제/위산억제제(증상에 따라)", "가스완화제(시메티콘)", "진통제(아세트아미노펜)"])
+    if any(k in t for k in ["headache", "두통", "頭痛"]):
+        if "해열제(아세트아미노펜)" not in otc:
+            otc.append("진통제(아세트아미노펜)")
+    if any(k in t for k in ["vomit", "vomiting", "구토", "嘔吐", "탈수", "dehydration"]):
+        otc.append("경구수분보충액(ORS)")
+    if any(k in t for k in ["rash", "발진", "알레르기", "蕁麻疹", "じんましん", "allergy"]):
+        otc.append("항히스타민제")
+    if any(k in t for k in ["sore throat", "인후통", "목아픔", "喉の痛み"]):
+        otc.append("목염증 완화 목캔디/로젠지")
+    if any(k in t for k in ["stuffy nose", "nasal congestion", "코막힘", "鼻づまり"]):
+        otc.append("비충혈 제거제(디콘제스턴트)")
+    if any(k in t for k in ["toothache", "치통", "歯痛"]):
+        if "진통제(아세트아미노펜)" not in otc:
+            otc.append("진통제(아세트아미노펜)")
+    if any(k in t for k in ["cut", "bleeding", "상처", "出血"]):
+        advice = "상처 부위를 압박하여 지혈하고, 깨끗한 물로 세척 후 멸균 거즈를 적용하세요. 심한 출혈은 즉시 119."
     
-    # 벌레 물림 키워드
-    insect_bite_keywords = [
-        "벌레", "물림", "벌레물림", "벌레에물림", "벌레에 물림",
-        "모기", "모기에물림", "모기에 물림",
-        "insect", "bite", "bug bite", "mosquito"
-    ]
+    # 벌레 물림 (말벌/벌 키워드 제외)
+    if any(k in t for k in ["벌레", "물림", "벌레에 물림", "벌레에물림", "모기", "모기에 물림", "모기에물림", "insect bite", "虫に刺された"]) and not any(k in t for k in ["말벌", "벌", "쏘임", "wasp", "bee", "蜂"]):
+        advice = "벌레 물림: 즉시 해당 부위를 깨끗한 물로 씻고, 얼음찜질로 부종을 완화하세요. 항히스타민 연고를 바르고, 긁지 않도록 주의하세요. 24시간 후에도 개선되지 않으면 의료진 상담하세요."
+        otc.extend(["항히스타민 연고", "소독제", "얼음팩"])
     
-    # 말벌 쏘임 키워드
-    wasp_sting_keywords = [
-        "말벌", "쏘임", "말벌쏘임", "말벌에쏘임", "말벌에 쏘임", "벌", "벌에쏘임", "벌에 쏘임",
-        "wasp", "sting", "wasp sting", "bee", "bee sting"
-    ]
+    # 말벌 쏘임 (우선순위 높음)
+    elif any(k in t for k in ["말벌", "벌", "쏘임", "말벌에 쏘임", "말벌에쏘임", "벌에 쏘임", "벌에쏘임", "wasp sting", "bee sting", "蜂に刺された"]):
+        advice = "말벌 쏘임: 즉시 침을 제거하고, 깨끗한 물로 세척하세요. 얼음찜질로 부종을 완화하고, 상처 부위를 심장보다 높게 유지하세요. 호흡곤란, 전신 두드러기, 의식 변화 시 즉시 119에 연락하세요."
+        otc.extend(["항히스타민 연고", "항히스타민제(경구)", "소독제", "얼음팩"])
     
-    advice = "조언 증상에 대한 기본 응급처치를 안내합니다. 심각한 증상이면 즉시 119(일본: 119)를 호출하세요."
-    otc = []
+    # LLM을 사용한 고급 조언 생성 (API 키가 있는 경우)
+    try:
+        # RAG 검색 결과 준비
+        rag_passages = []
+        if 'hits' in locals() and hits:
+            rag_passages = [hit[0] for hit in hits[:3]]  # 상위 3개 문서
+
+        # 이미지 분석 결과 준비 (간단한 버전)
+        image_findings = []
+        if 'uploaded_file' in locals() and uploaded_file:
+            image_findings = ["이미지 분석됨"] # Placeholder, actual image analysis is in main.py
+
+        # LLM 조언 생성
+        if rag_passages or image_findings:
+            llm_advice = generate_advice(symptoms_text, image_findings, rag_passages)
+            if llm_advice and not llm_advice.startswith("증상에 대한 일반 조언입니다"):
+                advice = llm_advice
+    except Exception as e:
+        # LLM 오류 시 기본 조언 사용
+        pass
+
     
-    # 응급상황 체크
-    if any(keyword in symptoms_lower for keyword in emergency_keywords):
-        advice = "🚨 응급상황입니다! 즉시 119에 연락하고 응급실로 가세요."
-        return {"advice": advice, "otc": [], "emergency": True}
-    
-    # 벌레 물림 특별 처리 (말벌/벌 키워드 제외)
-    if any(keyword in symptoms_lower for keyword in insect_bite_keywords) and not any(keyword in symptoms_lower for keyword in wasp_sting_keywords):
-        advice = """벌레 물림 응급처치:
-1. 즉시 해당 부위를 깨끗한 물로 씻으세요
-2. 얼음팩이나 차가운 물수건으로 부기를 줄이세요
-3. 항히스타민 연고나 크림을 바르세요
-4. 긁지 않도록 주의하세요 (감염 위험)
-5. 24시간 후에도 개선되지 않으면 의료진 상담하세요"""
-        otc = ["항히스타민 연고", "소독약", "얼음팩"]
-        return {"advice": advice, "otc": otc, "emergency": False}
-    
-    # 말벌 쏘임 특별 처리 (우선순위 높음)
-    elif any(keyword in symptoms_lower for keyword in wasp_sting_keywords):
-        advice = """말벌 쏘임 응급처치:
-1. 즉시 침을 제거하세요 (핀셋이나 신용카드 가장자리 사용)
-2. 상처 부위를 깨끗한 물로 씻으세요
-3. 얼음팩이나 차가운 물수건으로 부기를 줄이세요
-4. 상처 부위를 심장보다 높게 유지하세요
-5. 알레르기 반응(호흡곤란, 두드러기, 현기증)이 있으면 즉시 119에 연락"""
-        otc = ["항히스타민 연고", "항히스타민제", "소독약", "얼음팩"]
-        return {"advice": advice, "otc": otc, "emergency": False}
-    
-    # 일반 증상별 조언
-    if "복통" in symptoms_lower or "배아픔" in symptoms_lower:
-        advice = "복통이 있으면 금식하고 따뜻한 물을 조금씩 마시세요. 심한 통증이면 병원을 방문하세요."
-        otc = ["제산제", "진통제"]
-    elif "두통" in symptoms_lower or "머리아픔" in symptoms_lower:
-        advice = "두통이 있으면 조용한 곳에서 휴식을 취하고 충분한 수분을 섭취하세요."
-        otc = ["해열진통제"]
-    elif "감기" in symptoms_lower or "기침" in symptoms_lower:
-        advice = "감기 증상이 있으면 충분한 휴식과 수분 섭취를 하세요."
-        otc = ["해열제", "기침약"]
-    elif "화상" in symptoms_lower:
-        advice = "화상 부위를 차가운 물에 15-20분간 담그세요. 심한 화상이면 병원을 방문하세요."
-        otc = ["화상 연고", "소독약"]
-    
-    return {"advice": advice, "otc": otc, "emergency": False}
+    # ==================== LLM 기반 자동 생성 규칙 ====================
+
+    # 열이 39도입니다 관련 규칙
+    if any(k in t for k in ["열이 39도입니다"]):
+        advice = "열이 39도인 경우, 여러 원인이 있을 수 있으며, 특히 감염이나 염증이 있을 수 있습니다."
+        otc.extend(['해열제'])
+
+    # fever 38.5 관련 규칙
+    if any(k in t for k in ["fever 38.5"]):
+        advice = "증상으로 38."
+        otc.extend(['해열제', '의약'])
+
+    # 発熱が続きます 관련 규칙
+    if any(k in t for k in ["発熱が続きます"]):
+        advice = "발열이 지속되는 경우, 다음과 같은 조치를 취할 수 있습니다."
+        otc.extend([])
+
+    # 고열이 나요 관련 규칙
+    if any(k in t for k in ["고열이 나요"]):
+        advice = "고열이 나는 증상에 대해 안전 중심의 응급처치 및 OTC 조언을 드리겠습니다."
+        otc.extend([])
+
+    # 체온이 높아요 관련 규칙
+    if any(k in t for k in ["체온이 높아요"]):
+        advice = "체온이 높다는 것은 발열을 의미하며, 이는 여러 원인에 의해 발생할 수 있습니다."
+        otc.extend(['의약'])
+
+    # 열감이 있어요 관련 규칙
+    if any(k in t for k in ["열감이 있어요"]):
+        advice = "열감이 있는 경우, 다음과 같은 조치를 취할 수 있습니다."
+        otc.extend(['의약'])
+
+    # 몸이 뜨거워요 관련 규칙
+    if any(k in t for k in ["몸이 뜨거워요"]):
+        advice = "몸이 뜨거운 증상은 여러 원인에 의해 발생할 수 있으며, 특히 열이 나는 경우에는 주의가 필요합니다."
+        otc.extend(['의약'])
+
+    # 발열과 두통 관련 규칙
+    if any(k in t for k in ["발열과 두통"]):
+        advice = "발열과 두통 증상에 대해 안전 중심의 응급처치 및 OTC 조언을 드리겠습니다."
+        otc.extend(['해열제', '의약'])
+
+    # 고열과 오한 관련 규칙
+    if any(k in t for k in ["고열과 오한"]):
+        advice = "고열과 오한 증상에 대한 안전 중심의 응급처치 및 OTC 조언을 드리겠습니다."
+        otc.extend([])
+
+    # 열이 안 떨어져요 관련 규칙
+    if any(k in t for k in ["열이 안 떨어져요"]):
+        advice = "열이 떨어지지 않는 증상에 대해 다음과 같은 안전 중심의 응급처치 및 OTC 조언을 드립니다."
+        otc.extend([])
+
+    return {"advice": advice, "otc": otc}
+
+# ==================== 응급상황 감지 ====================
+CRITICAL_KEYWORDS = [
+    "chest pain", "심한 가슴 통증", "胸の激痛",
+    "severe bleeding", "대량 출혈", "大量出血",
+    "unconscious", "의식 없음", "意識なし",
+    "stroke", "편마비", "脳卒中",
+    "difficulty breathing", "숨이 가쁨", "呼吸困難",
+    "severe abdominal pain", "복부 극심한 통증", "激しい腹痛",
+    "anaphylaxis", "아나필락시스", "심한 알레르기 반응", "전신 두드러기", "호흡곤란",
+    "severe allergic reaction", "全身蕁麻疹", "呼吸困難",
+]
+
+def detect_emergency(symptoms_text: str) -> list:
+    t = (symptoms_text or "").lower()
+    reasons: list = []
+    for k in CRITICAL_KEYWORDS:
+        if k in t:
+            reasons.append(k)
+    return reasons
 
 # ==================== 이미지 분석 ====================
 def simple_image_screening(img: Image.Image) -> List[str]:
-    img_array = np.array(img)
+    w, h = img.size
+    findings: List[str] = []
+    if min(w, h) < 128:
+        findings.append("저해상도 이미지")
+    return findings
+
+def detect_emergency_from_image(img: Image.Image, raw_image: bytes = None) -> List[str]:
+    reasons: List[str] = []
+    red_thr = 0.25
+    burn_thr = 0.30
     
-    # 휴식 분석
-    red_ratio = np.mean(img_array[:, :, 0]) / 255.0
-    green_ratio = np.mean(img_array[:, :, 1]) / 255.0
-    blue_ratio = np.mean(img_array[:, :, 2]) / 255.0
-    
-    findings = []
-    
-    # 빨간색 비율이 높으면 출혈 가능성
-    red_threshold = float(os.getenv("IMG_RED_RATIO", "0.3"))
-    if red_ratio > red_threshold:
-        findings.append("출혈 가능성")
-    
-    # 화상 분석 (빨간색과 갈색)
-    burn_threshold = float(os.getenv("IMG_BURN_RATIO", "0.2"))
-    if red_ratio > burn_threshold and green_ratio < 0.3:
-        findings.append("화상 가능성")
+    # 휴리스틱 분석
+    try:
+        small = img.resize((224, 224))
+        hsv = small.convert("HSV")
+        arr = np.array(hsv)
+        h = arr[:, :, 0].astype(np.float32)
+        s = arr[:, :, 1].astype(np.float32)
+        v = arr[:, :, 2].astype(np.float32)
+        
+        red_mask = ((h < 10) | (h > 245)) & (s > 100) & (v > 60)
+        red_ratio = float(red_mask.mean())
+        if red_ratio > red_thr:
+            reasons.append("이미지상 과다 출혈 의심")
+            
+        orange_mask = (h >= 10) & (h <= 50) & (s > 120) & (v > 120)
+        orange_ratio = float(orange_mask.mean())
+        if orange_ratio > burn_thr:
+            reasons.append("이미지상 화상/광범위 홍반 의심")
+    except Exception:
+        pass
     
     # OpenAI Vision API 분석 (환경변수가 설정된 경우)
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    if openai_api_key:
-        try:
+    try:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key and raw_image:
             import openai
-            client = openai.OpenAI(api_key=openai_api_key)
+            client = openai.OpenAI(api_key=api_key)
             
             # 이미지를 base64로 인코딩
-            img_buffer = img.tobytes()
-            img_base64 = base64.b64encode(img_buffer).decode()
+            import base64
+            from io import BytesIO
+            
+            img_buffer = BytesIO()
+            img.save(img_buffer, format="JPEG")
+            img_bytes = img_buffer.getvalue()
+            b64_image = base64.b64encode(img_bytes).decode("utf-8")
             
             # 의료 이미지 분석 프롬프트
+            prompt = """
+            이 의료/상해 이미지를 분석해주세요. 다음 항목들을 확인하고 발견된 것만 한국어로 보고해주세요:
+            
+            응급상황:
+            - 심한 출혈 (과다 출혈, 대량 출혈)
+            - 심한 화상 (2도 이상 화상, 광범위 화상)
+            - 뼈 노출 (골절, 개방성 골절)
+            - 절단상 (손가락, 팔, 다리 절단)
+            - 중증 외상 (심각한 상처, 깊은 상처)
+            
+            일반 의료상황:
+            - 발진, 알레르기 반응
+            - 부종, 붓기
+            - 멍, 타박상
+            - 가벼운 상처, 찰과상
+            - 피부염, 습진
+            - 물집, 수포
+            
+            발견된 증상이 없으면 "정상"이라고 답해주세요.
+            """
+            
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=[
+                    {
+                        "role": "system", 
+                        "content": "당신은 의료 이미지 분석 전문가입니다. 정확하고 신중하게 분석해주세요."
+                    },
                     {
                         "role": "user",
                         "content": [
-                            {
-                                "type": "text",
-                                "text": """이 의료/상해 이미지를 분석해주세요. 다음 항목들을 확인하고 발견된 것만 한국어로 보고해주세요:
-1. 출혈 여부
-2. 화상 여부
-3. 부종/붓기
-4. 상처의 심각도
-5. 기타 주목할 만한 증상
-
-간단하고 명확하게 보고해주세요."""
-                            },
+                            {"type": "text", "text": prompt},
                             {
                                 "type": "image_url",
                                 "image_url": {
-                                    "url": f"data:image/jpeg;base64,{img_base64}"
+                                    "url": f"data:image/jpeg;base64,{b64_image}",
+                                    "detail": "high"
                                 }
                             }
                         ]
                     }
                 ],
-                max_tokens=200,
+                max_tokens=500,
                 temperature=0.1
             )
             
             analysis = response.choices[0].message.content.strip()
-            if analysis and analysis != "분석할 수 있는 특별한 의료 증상이 보이지 않습니다.":
-                findings.append(f"AI 분석: {analysis}")
-                
-        except Exception as e:
-            findings.append(f"AI 분석: 이미지 분석 중 오류 발생")
-    
-    return findings
-
-def detect_emergency_from_image(img: Image.Image, img_bytes: bytes) -> List[str]:
-    """이미지에서 응급상황을 감지합니다."""
-    findings = simple_image_screening(img)
-    
-    emergency_keywords = ["출혈", "화상", "심한", "응급", "위험", "부종", "붓기"]
-    emergency_findings = []
-    
-    for finding in findings:
-        if any(keyword in finding for keyword in emergency_keywords):
-            emergency_findings.append(finding)
-    
-    return emergency_findings
-
-# ==================== OTC 매핑 ====================
-def map_otc_to_brands(otc_list: List[str]) -> List[str]:
-    mapping = {
-        "해열제": "アセトアミノフェン (Acetaminophen)",
-        "진통제": "イブプロフェン (Ibuprofen)",
-        "제산제": "制酸剤 (Antacid)",
-        "기침약": "咳止め (Cough Suppressant)",
-        "항히스타민": "抗ヒスタミン (Antihistamine)",
-        "소독약": "消毒剤 (Antiseptic)",
-        "화상 연고": "やけど軟膏 (Burn Ointment)"
-    }
-    
-    brands = []
-    for otc in otc_list:
-        if otc in mapping:
-            brands.append(mapping[otc])
-    
-    return brands
-
-def map_otc_to_images(otc_list: List[str]) -> List[str]:
-    mapping = {
-        "해열제": "🌡️",
-        "진통제": "💊",
-        "제산제": "🧪",
-        "기침약": "🤧",
-        "항히스타민": "🩹",
-        "소독약": "🧴",
-        "화상 연고": "🩹"
-    }
-    
-    images = []
-    for otc in otc_list:
-        if otc in mapping:
-            images.append(mapping[otc])
-    
-    return images
-
-def build_jp_phrase(symptoms: str, otc_list: List[str]) -> str:
-    """일본어 문장을 생성합니다."""
-    jp_symptoms = {
-        "복통": "お腹が痛いです",
-        "두통": "頭が痛いです",
-        "감기": "風邪をひきました",
-        "화상": "やけどをしました",
-        "벌레": "虫に刺されました",
-        "말벌": "ハチに刺されました"
-    }
-    
-    symptom_jp = "具合が悪いです"  # 기본값
-    for symptom, jp in jp_symptoms.items():
-        if symptom in symptoms:
-            symptom_jp = jp
-            break
-    
-    otc_jp = []
-    for otc in otc_list:
-        if "해열" in otc:
-            otc_jp.append("解熱剤")
-        elif "진통" in otc:
-            otc_jp.append("鎮痛剤")
-        elif "제산" in otc:
-            otc_jp.append("制酸剤")
-        elif "기침" in otc:
-            otc_jp.append("咳止め")
-        elif "항히스타민" in otc:
-            otc_jp.append("抗ヒスタミン剤")
-    
-    if otc_jp:
-        return f"{symptom_jp}。{', '.join(otc_jp)}をください。"
-    else:
-        return f"{symptom_jp}。薬をください。"
-
-# ==================== 지오 서비스 ====================
-def geocode_place(place: str) -> Tuple[float, float]:
-    """장소명을 좌표로 변환합니다."""
-    try:
-        # MVP 모드 체크
-        if os.getenv("MVP_RANDOM_TOKYO") == "true":
-            import random
-            return (35.6762 + random.uniform(-0.1, 0.1), 139.6503 + random.uniform(-0.1, 0.1))
-        
-        if os.getenv("MVP_FIXED_SHINJUKU") == "true":
-            return (35.6762, 139.6503)
-        
-        # 실제 지오코딩
-        response = requests.get(
-            f"https://nominatim.openstreetmap.org/search?q={place}&format=json&limit=1",
-            headers={"User-Agent": "HOS-App/1.0"}
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data:
-                return (float(data[0]["lat"]), float(data[0]["lon"]))
-        
-        # 폴백: 도쿄 중심
-        return (35.6762, 139.6503)
-    except:
-        return (35.6762, 139.6503)
-
-def reverse_geocode(lat: float, lon: float) -> str:
-    """좌표를 주소로 변환합니다."""
-    try:
-        response = requests.get(
-            f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json",
-            headers={"User-Agent": "HOS-App/1.0"}
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("display_name", f"위도: {lat}, 경도: {lon}")
-        
-        return f"위도: {lat}, 경도: {lon}"
-    except:
-        return f"위도: {lat}, 경도: {lon}"
-
-def build_address_from_tags(tags: Dict) -> str:
-    """OSM 태그에서 주소를 구성합니다."""
-    address_parts = []
-    
-    if "addr:city" in tags:
-        address_parts.append(tags["addr:city"])
-    if "addr:street" in tags:
-        address_parts.append(tags["addr:street"])
-    if "addr:housenumber" in tags:
-        address_parts.append(tags["addr:housenumber"])
-    
-    return " ".join(address_parts) if address_parts else "주소 정보 없음"
-
-def search_hospitals(lat: float, lon: float) -> List[Dict]:
-    """근처 병원을 검색합니다."""
-    try:
-        # Overpass API 쿼리
-        query = f"""
-        [out:json];
-        (
-          node["amenity"="hospital"](around:1000,{lat},{lon});
-          way["amenity"="hospital"](around:1000,{lat},{lon});
-          relation["amenity"="hospital"](around:1000,{lat},{lon});
-        );
-        out center;
-        """
-        
-        response = requests.post(
-            "https://overpass-api.de/api/interpreter",
-            data=query,
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            hospitals = []
             
-            for element in data.get("elements", []):
-                if "tags" in element:
-                    name = element["tags"].get("name", "Unknown Hospital")
-                    
-                    # 좌표 추출
-                    if "lat" in element and "lon" in element:
-                        elat, elon = element["lat"], element["lon"]
-                    elif "center" in element:
-                        elat, elon = element["center"]["lat"], element["center"]["lon"]
-                    else:
-                        continue
-                    
-                    # 주소 구성
-                    address = build_address_from_tags(element["tags"])
-                    if address == "주소 정보 없음":
-                        address = reverse_geocode(elat, elon)
-                    
-                    hospitals.append({
-                        "name": name,
-                        "lat": elat,
-                        "lon": elon,
-                        "address": address
-                    })
+            # 응급상황 키워드 체크
+            emergency_keywords = ["심한 출혈", "과다 출혈", "대량 출혈", "심한 화상", "2도 이상", "광범위 화상", 
+                                "뼈 노출", "골절", "개방성", "절단", "중증 외상", "심각한 상처", "깊은 상처"]
             
-            return hospitals[:5]  # 최대 5개
-        
-        return []
-    except:
-        return []
-
-def search_pharmacies(lat: float, lon: float) -> List[Dict]:
-    """근처 약국을 검색합니다."""
-    try:
-        # Overpass API 쿼리
-        query = f"""
-        [out:json];
-        (
-          node["amenity"="pharmacy"](around:1000,{lat},{lon});
-          way["amenity"="pharmacy"](around:1000,{lat},{lon});
-          relation["amenity"="pharmacy"](around:1000,{lat},{lon});
-        );
-        out center;
-        """
-        
-        response = requests.post(
-            "https://overpass-api.de/api/interpreter",
-            data=query,
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            pharmacies = []
-            
-            for element in data.get("elements", []):
-                if "tags" in element:
-                    name = element["tags"].get("name", "Unknown Pharmacy")
+            for keyword in emergency_keywords:
+                if keyword in analysis:
+                    reasons.append(f"AI 분석: {analysis}")
+                    break
+            else:
+                # 응급상황이 아닌 경우 일반 의료상황으로 분류
+                if "정상" not in analysis and analysis:
+                    reasons.append(f"AI 분석: {analysis}")
                     
-                    # 좌표 추출
-                    if "lat" in element and "lon" in element:
-                        elat, elon = element["lat"], element["lon"]
-                    elif "center" in element:
-                        elat, elon = element["center"]["lat"], element["center"]["lon"]
-                    else:
-                        continue
-                    
-                    # 주소 구성
-                    address = build_address_from_tags(element["tags"])
-                    if address == "주소 정보 없음":
-                        address = reverse_geocode(elat, elon)
-                    
-                    pharmacies.append({
-                        "name": name,
-                        "lat": elat,
-                        "lon": elon,
-                        "address": address
-                    })
-            
-            return pharmacies[:5]  # 최대 5개
-        
-        return []
-    except:
-        return []
+    except Exception as e:
+        # OpenAI API 오류 시 휴리스틱 결과만 사용
+        pass
+    
+    return reasons
 
-def build_google_maps_link(lat: float, lon: float, name: str) -> str:
-    """Google Maps 링크를 생성합니다."""
-    return f"https://www.google.com/maps/search/?api=1&query={lat},{lon}&query_place_id={name}"
+# ==================== 일본어 문장 생성 ====================
+def build_jp_phrase(symptoms_text: str, otc: list) -> str:
+    base = "薬局で相談したいです。"
+    if any("지사제" in o or "설사" in symptoms_text for o in otc) or ("설사" in (symptoms_text or "")):
+        return base + "『腹痛や下痢があります。市販の整腸剤や下痢止めを探しています。』"
+    if any("해열" in o or "열" in symptoms_text for o in otc) or ("발열" in (symptoms_text or "") or "열" in (symptoms_text or "")):
+        return base + "『発熱があります。アセトアミノフェン成分の解熱薬を探しています。』"
+    if any("진해" in o or "기침" in symptoms_text for o in otc) or ("咳" in (symptoms_text or "")):
+        return base + "『咳があります。市販の鎮咳去痰薬を探しています。』"
+    return base + "『症状に合う一般用医薬品を教えてください。』"
 
-# ==================== 의약품 검색 ====================
+def map_otc_to_brands(otc: list) -> list:
+    hints: list = []
+    for o in otc:
+        lo = o.lower()
+        if "해열" in o or "acet" in lo:
+            hints.append("解熱薬: アセトアミノフェン配合製品")
+        if "지사" in o:
+            hints.append("下痢止め/整腸剤: 乳酸菌/ロペラミド系(症状により) ※用法注意")
+        if "제산" in o or "위산" in o:
+            hints.append("胃薬: 制酸薬/H2ブロッカー系(症状により) ※相互作用注意")
+        if "가스" in o or "시메티콘" in o:
+            hints.append("胃腸薬: シメチコン配合")
+        if "진통제" in o:
+            hints.append("鎮痛薬: アセトアミノフェン優先(イブプロフェン等は状況で回避)")
+        if "진해" in o:
+            hints.append("咳止め: 鎮咳去痰薬カテゴリ")
+        if "항히스타민" in o:
+            hints.append("抗ヒスタミン薬: かゆみ/蕁麻疹等")
+        if "경구수분보충" in o or "ORS" in o.upper():
+            hints.append("経口補水液(ORS): 脱水時の電解質/水分補給")
+        if "로젠지" in o or "목염증" in o:
+            hints.append("トローチ/のど飴: 咽頭痛緩和")
+        if "비충혈" in o or "디콘제스턴트" in o or "decongestant" in lo:
+            hints.append("鼻づまり: 血管収縮点鼻薬(短期使用)")
+    
+    out = []
+    for h in hints:
+        if h not in out:
+            out.append(h)
+    return out
+
+# ==================== 지도 링크 생성 ====================
+def build_google_maps_link(lat: Optional[float], lon: Optional[float], name: Optional[str] = None) -> Optional[str]:
+    if lat is None or lon is None:
+        return None
+    q = f"{lat},{lon}"
+    if name:
+        q = name
+    return f"https://www.google.com/maps/search/?api=1&query={q}"
+
+# ==================== OTC 이미지 매핑 ====================
+def map_otc_to_images(otc: list) -> list:
+    urls: list = []
+    
+    def add_for(cat: str, placeholder: str) -> None:
+        # 로컬 이미지가 있으면 사용, 없으면 플레이스홀더
+        urls.append(placeholder)
+    
+    for o in otc:
+        lo = o.lower()
+        if ("해열" in o) or ("acet" in lo):
+            add_for("acetaminophen", "💊")
+        if "지사" in o:
+            add_for("antidiarrheal", "💊")
+        if ("제산" in o) or ("위산" in o):
+            add_for("antacid", "💊")
+        if ("가스" in o) or ("시메티콘" in o):
+            add_for("simethicone", "💊")
+        if "항히스타민" in o:
+            add_for("antihistamine", "💊")
+        if ("경구수분보충" in o) or ("ors" in lo):
+            add_for("ors", "💊")
+        if ("로젠지" in o) or ("목염증" in o):
+            add_for("lozenge", "💊")
+        if ("비충혈" in o) or ("decongestant" in lo) or ("디콘제스턴트" in o):
+            add_for("decongestant", "💊")
+        if ("화상" in o) or ("burn" in lo):
+            add_for("burngel", "💊")
+        if ("보습" in o) or ("건조" in o) or ("atopy" in lo) or ("아토피" in o):
+            add_for("emollient", "💊")
+    
+    # 중복 제거
+    dedup: list = []
+    for u in urls:
+        if u not in dedup:
+            dedup.append(u)
+    return dedup
+
+# ==================== RAD-AR 의약품 검색 ====================
+import re
+import time
+from urllib.parse import urljoin, quote
+from bs4 import BeautifulSoup
+import json
+from pathlib import Path
+
+RADAR_BASE = "https://www.rad-ar.or.jp/siori/english/"
+RADAR_SEARCH_URL = urljoin(RADAR_BASE, "search")
+
+RADAR_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept-Language": "en,ja;q=0.9,ko;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Referer": RADAR_BASE.rstrip("/") + "/",
+}
+
+def radar_session():
+    s = requests.Session()
+    s.headers.update(RADAR_HEADERS)
+    return s
+
 def radar_search(keyword: str, limit: int = 5) -> List[Dict]:
-    """RAD-AR에서 의약품 정보를 검색합니다."""
     try:
-        # 간단한 모의 데이터 (실제로는 RAD-AR API 호출)
-        mock_data = [
-            {
-                "brand": "ロキソニン",
-                "company": "第一三共",
-                "active_ingredient": "ロキソプロフェンナトリウム",
-                "dosage_form": "錠剤",
-                "url": "https://www.rad-ar.or.jp/siori/english/"
-            },
-            {
-                "brand": "バファリン",
-                "company": "ライオン",
-                "active_ingredient": "アセトアミノフェン",
-                "dosage_form": "錠剤",
-                "url": "https://www.rad-ar.or.jp/siori/english/"
-            }
-        ]
+        params = {"w": keyword}
+        s = radar_session()
+        res = s.get(RADAR_SEARCH_URL, params=params, timeout=15)
+        res.raise_for_status()
         
-        # 키워드 매칭
+        soup = BeautifulSoup(res.text, "lxml")
         results = []
-        for item in mock_data:
-            if keyword.lower() in item["active_ingredient"].lower() or keyword.lower() in item["brand"].lower():
-                results.append(item)
         
-        return results[:limit]
-    except:
+        # 검색 결과 링크 파싱
+        links = []
+        for a in soup.select('a[href*="search/result?n="]'):
+            href = a.get("href")
+            if href:
+                full_url = urljoin(RADAR_BASE, href)
+                if full_url not in links:
+                    links.append(full_url)
+        
+        # 상세 정보 가져오기
+        for url in links[:limit]:
+            try:
+                detail_res = s.get(url, timeout=15)
+                detail_res.raise_for_status()
+                detail_soup = BeautifulSoup(detail_res.text, "lxml")
+                
+                # 기본 정보 추출
+                brand = ""
+                h1 = detail_soup.select_one("h1")
+                if h1:
+                    brand = h1.get_text(strip=True)
+                
+                company = ""
+                for a in detail_soup.find_all("a", href=True):
+                    href = a["href"].strip()
+                    if href.startswith("http") and "rad-ar.or.jp" not in href:
+                        company = a.get_text(strip=True)
+                        break
+                
+                # 테이블에서 정보 추출
+                active_ingredient = ""
+                dosage_form = ""
+                for tr in detail_soup.select("table tr"):
+                    cells = tr.find_all(["td", "th"])
+                    if len(cells) >= 2:
+                        key = re.sub(r"\s+", " ", cells[0].get_text(strip=True))
+                        val = cells[1].get_text(strip=True)
+                        if "Active ingredient" in key:
+                            active_ingredient = val
+                        elif "Dosage form" in key:
+                            dosage_form = val
+                
+                results.append({
+                    "brand": brand,
+                    "company": company,
+                    "active_ingredient": active_ingredient,
+                    "dosage_form": dosage_form,
+                    "url": url
+                })
+                
+                time.sleep(0.5)  # 요청 간격
+                
+            except Exception as e:
+                continue
+                
+        return results
+        
+    except Exception as e:
         return []
 
 # ==================== 메인 앱 ====================
-st.header("증상 입력")
+@st.cache_resource
+def load_rag():
+    """고도화된 RAG 시스템 로드"""
+    return GLOBAL_ADVANCED_RAG
 
-with st.form("symptom_form"):
-    symptoms = st.text_area("어떤 증상이 있나요?", placeholder="예: 복통, 두통, 벌레에 물렸어요")
-    uploaded = st.file_uploader("상처 사진 (선택사항)", type=["jpg", "jpeg", "png"])
+# RAG 로드
+rag = load_rag()
+
+with st.form("chat_form"):
+    uploaded = st.file_uploader("증상 사진 업로드 (선택)", type=["png", "jpg", "jpeg"])
+    symptoms = st.text_area("증상 설명", placeholder="예) 이마가 찢어져 피가 나요, 열이 38.5도예요")
     
     # 위치 설정 섹션
     st.subheader("📍 위치 설정")
@@ -556,6 +696,10 @@ with st.form("symptom_form"):
     submitted = st.form_submit_button("상담하기")
 
 if submitted:
+    # 로깅을 위한 시작 시간
+    start_time = time.time()
+    session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
     with st.spinner("분석 중..."):
         # 이미지 분석
         findings = []
@@ -572,56 +716,35 @@ if submitted:
                     findings.extend(emg_img)
             except Exception as e:
                 findings = ["이미지 해석 실패"]
-                st.write(f"🔍 디버깅: 이미지 분석 오류 = {str(e)}")
         
         # 기본 규칙 기반 조언
         rule_out = simple_text_rules(symptoms)
         advice = rule_out["advice"]
         otc = rule_out["otc"]
         
-        # LLM을 사용한 고급 조언 생성 (API 키가 있는 경우)
-        try:
-            # RAG 검색 결과 준비
-            rag_passages = []
-            if hits:
-                rag_passages = [hit[0] for hit in hits[:3]]  # 상위 3개 문서
-            
-            # 이미지 분석 결과 준비
-            image_findings = []
-            if uploaded_file:
-                # 이미지 분석 로직 (간단한 버전)
-                image_findings = ["이미지 분석됨"]
-            
-            # LLM 조언 생성
-            if rag_passages or image_findings:
-                llm_advice = generate_advice(symptoms, image_findings, rag_passages)
-                if llm_advice and not llm_advice.startswith("증상에 대한 일반 조언입니다"):
-                    advice = llm_advice
-        except Exception as e:
-            # LLM 오류 시 기본 조언 사용
-            pass
-        
-        # 디버깅 정보
-        st.write(f"🔍 디버깅: 입력된 증상 = '{symptoms}'")
-        st.write(f"🔍 디버깅: 추천 OTC = {otc}")
-        
-        # RAG 검색
+        # 고도화된 RAG 검색
         rag_results = []
         rag_confidence = 0.0
         try:
-            hits = rag.search(symptoms, top_k=3)
+            # 고도화된 검색: 쿼리 확장, Dense+Sparse 결합, 리랭킹 포함
+            hits = rag.search(symptoms, top_k=3, use_reranking=True)
             passages = [h[0] for h in hits]
             rag_results = hits
             rag_confidence = max([score for _, score in hits]) if hits else 0.0
             evidence_titles = []
-            for txt, _ in hits:
+            for txt, score in hits:
                 first = (txt.strip().splitlines() or [""])[0].strip()
-                evidence_titles.append(first[:80] if first else "근거 문서")
-            st.write(f"🔍 디버깅: RAG 검색 결과 = {len(hits)}개")
+                evidence_titles.append(f"{first[:60]}... (신뢰도: {score:.2f})" if first else "근거 문서")
+            
+            # RAG 시스템 통계 표시 (디버깅용)
+            if st.checkbox("🔍 RAG 시스템 통계 보기", value=False):
+                stats = rag.get_search_stats()
+                st.json(stats)
+                
         except Exception as e:
             passages = []
             evidence_titles = []
-            st.write(f"🔍 디버깅: RAG 검색 오류 = {str(e)}")
+            st.error(f"RAG 검색 오류: {str(e)}")
         
         # 지오 검색
         nearby_hospitals = []
@@ -631,37 +754,38 @@ if submitted:
                 # 테스트 모드: 도쿄의 랜덤한 지역 사용
                 lat, lon = random_tokyo_latlon()
                 st.info(f"🧪 테스트 모드: ({lat:.4f}, {lon:.4f}) 위치에서 검색 중...")
-            elif loc and 'latitude' in loc and 'longitude' in loc:
+            elif loc and loc.get("latitude") and loc.get("longitude"):
                 # 실제 위치 사용 (브라우저 GPS)
-                lat, lon = loc['latitude'], loc['longitude']
+                lat, lon = loc["latitude"], loc["longitude"]
                 st.info(f"📍 실제 위치: ({lat:.4f}, {lon:.4f})")
             else:
                 # 입력된 위치로 검색
-                lat, lon = geocode_place(location)
-                if lat and lon:
+                geo = geocode_place(location)
+                if geo:
+                    lat, lon = geo["lat"], geo["lon"]
                     st.info(f"📍 검색된 위치: {location} ({lat:.4f}, {lon:.4f})")
                 else:
                     lat, lon = 35.676203, 139.650311  # Tokyo fallback
                     st.warning(f"⚠️ 위치 검색 실패, 도쿄 기본 위치 사용: ({lat:.4f}, {lon:.4f})")
             
-            # 병원과 약국 검색
-            nearby_hospitals = search_hospitals(lat, lon)
-            nearby_pharmacies = search_pharmacies(lat, lon)
-            
+            nearby_hospitals = search_hospitals(lat, lon, 2000)
+            nearby_pharmacies = search_pharmacies(lat, lon, 1500)
         except Exception as e:
             st.error(f"위치 검색 오류: {str(e)}")
+            pass
         
-        # 응급상황 체크
-        emergency_reasons = []
-        if rule_out.get("emergency", False):
-            emergency_reasons.append("증상 기반 응급상황")
-        
+        # 응급상황 감지
+        emergency_reasons = detect_emergency(symptoms)
         if findings:
-            emergency_findings = [f for f in findings if any(keyword in f for keyword in ["출혈", "화상", "심한", "응급"])]
-            if emergency_findings:
-                emergency_reasons.extend(emergency_findings)
+            for f in findings:
+                if any(s in f.lower() for s in ["출혈", "bleeding", "화상", "burn"]):
+                    emergency_reasons.append(f)
         
-        # 결과 표시
+        # 업로드된 이미지 표시
+        if uploaded is not None:
+            st.subheader("업로드된 이미지")
+            st.image(uploaded, caption="증상 사진", use_container_width=True)
+        
         if emergency_reasons:
             st.error("위급 신호가 감지되었습니다. 즉시 119로 전화하세요.")
             st.write("근거: ", ", ".join(emergency_reasons))
@@ -784,14 +908,47 @@ if submitted:
             
             st.caption("일본 현지 드럭스토어/약국(Matsumoto Kiyoshi, Welcia 등)에서 구매 가능")
         
-        # 처리 시간 표시
-        processing_time = time.time() - start_time if 'start_time' in locals() else 0
-        st.write(f"🔍 디버깅: 처리 시간 = {processing_time:.2f}초")
+        # 로깅 완료
+        processing_time = time.time() - start_time
         
-        # 기본 조언 감지 및 알림
-        default_advice = "조언 증상에 대한 기본 응급처치를 안내합니다. 심각한 증상이면 즉시 119(일본: 119)를 호출하세요."
+        # 응답 품질 평가
+        default_advice = "증상에 대한 기본 응급처치를 안내합니다. 심각한 증상이면 즉시 119(일본: 119)를 호출하세요."
         is_default_advice = advice.strip() == default_advice.strip()
         
+        advice_quality = "good" if rag_confidence > 0.5 and len(rag_results) > 0 and not is_default_advice else "poor"
+        
+        # 기본 조언인 경우 실패로 간주
         if is_default_advice:
-            st.warning("⚠️ 이 증상에 대한 구체적인 조언이 없습니다. 시스템이 개선될 때까지 기본 응급처치를 따르세요.")
-            st.info("💡 더 정확한 조언을 위해 증상을 더 자세히 설명해주세요.")
+            advice_quality = "failed"
+        
+        # 위치 정보
+        location_coords = None
+        if not test_mode and loc and 'latitude' in loc and 'longitude' in loc:
+            location_coords = (loc['latitude'], loc['longitude'])
+        
+        # 로그 기록 (배포용에서는 비활성화)
+        # try:
+        #     log_id = symptom_logger.log_symptom(
+        #         user_input=symptoms,
+        #         image_uploaded=image_uploaded,
+        #         rag_results=rag_results,
+        #         advice_generated=bool(advice),
+        #         advice_quality=advice_quality,
+        #         hospital_found=len(nearby_hospitals) > 0,
+        #         pharmacy_found=len(nearby_pharmacies) > 0,
+        #         location=location_coords,
+        #         processing_time=processing_time,
+        #         session_id=session_id
+        #     )
+        except Exception as e:
+            pass
+        
+        # 기본 조언인 경우 자동 크롤링 트리거 (배포용에서는 비활성화)
+        # if is_default_advice:
+        #     try:
+        #         st.info("🔍 새로운 증상이 감지되었습니다. 관련 정보를 수집 중입니다...")
+        #         # 백그라운드에서 자동 크롤링 실행
+        #         auto_crawl_unhandled_symptoms()
+        #         st.success("✅ 새로운 의료 정보가 수집되었습니다. 다음에 더 정확한 조언을 제공할 수 있습니다.")
+        #     except Exception as e:
+        #         st.warning(f"⚠️ 자동 정보 수집 중 오류가 발생했습니다: {str(e)}")
