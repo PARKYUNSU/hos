@@ -21,6 +21,7 @@ sys.path.append('backend')
 from services_logging import symptom_logger
 from services_auto_crawler import auto_crawl_unhandled_symptoms
 from services_advanced_rag import GLOBAL_ADVANCED_RAG, load_disk_passages
+from services_gen import generate_advice
 
 st.set_page_config(page_title="응급 챗봇", page_icon="🚑", layout="centered")
 st.title("응급 환자 챗봇 (일본)")
@@ -267,6 +268,27 @@ def simple_text_rules(symptoms_text: str) -> dict:
         advice = "말벌 쏘임: 즉시 침을 제거하고, 깨끗한 물로 세척하세요. 얼음찜질로 부종을 완화하고, 상처 부위를 심장보다 높게 유지하세요. 호흡곤란, 전신 두드러기, 의식 변화 시 즉시 119에 연락하세요."
         otc.extend(["항히스타민 연고", "항히스타민제(경구)", "소독제", "얼음팩"])
     
+    # LLM을 사용한 고급 조언 생성 (API 키가 있는 경우)
+    try:
+        # RAG 검색 결과 준비
+        rag_passages = []
+        if 'hits' in locals() and hits:
+            rag_passages = [hit[0] for hit in hits[:3]]  # 상위 3개 문서
+
+        # 이미지 분석 결과 준비 (간단한 버전)
+        image_findings = []
+        if 'uploaded_file' in locals() and uploaded_file:
+            image_findings = ["이미지 분석됨"] # Placeholder, actual image analysis is in main.py
+
+        # LLM 조언 생성
+        if rag_passages or image_findings:
+            llm_advice = generate_advice(symptoms_text, image_findings, rag_passages)
+            if llm_advice and not llm_advice.startswith("증상에 대한 일반 조언입니다"):
+                advice = llm_advice
+    except Exception as e:
+        # LLM 오류 시 기본 조언 사용
+        pass
+
     return {"advice": advice, "otc": otc}
 
 # ==================== 응급상황 감지 ====================
