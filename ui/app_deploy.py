@@ -19,7 +19,7 @@ from datetime import datetime
 # 백엔드 서비스 임포트 (배포용 - 로깅 포함)
 sys.path.append('backend')
 from services_logging import symptom_logger
-# from services_auto_crawler import auto_crawl_unhandled_symptoms
+from services_auto_crawler import auto_crawl_unhandled_symptoms
 from services_advanced_rag import GLOBAL_ADVANCED_RAG, load_disk_passages
 from services_gen import generate_advice
 
@@ -359,8 +359,9 @@ def simple_image_screening(img: Image.Image) -> List[str]:
 
 def detect_emergency_from_image(img: Image.Image, raw_image: bytes = None) -> List[str]:
     reasons: List[str] = []
-    red_thr = 0.25
-    burn_thr = 0.30
+    # 환경변수에서 임계값 가져오기 (기본값 사용)
+    red_thr = float(os.getenv("IMG_RED_RATIO", "0.25"))
+    burn_thr = float(os.getenv("IMG_BURN_RATIO", "0.30"))
     
     # 휴리스틱 분석
     try:
@@ -944,6 +945,7 @@ if submitted:
         try:
             log_id = symptom_logger.log_symptom(
                 user_input=symptoms,
+                advice_content=advice,
                 image_uploaded=image_uploaded,
                 rag_results=rag_results,
                 advice_generated=bool(advice),
@@ -957,12 +959,12 @@ if submitted:
         except Exception as e:
             pass
         
-        # 기본 조언인 경우 자동 크롤링 트리거 (배포용에서는 비활성화)
-        # if is_default_advice:
-        #     try:
-        #         st.info("🔍 새로운 증상이 감지되었습니다. 관련 정보를 수집 중입니다...")
-        #         # 백그라운드에서 자동 크롤링 실행
-        #         auto_crawl_unhandled_symptoms()
-        #         st.success("✅ 새로운 의료 정보가 수집되었습니다. 다음에 더 정확한 조언을 제공할 수 있습니다.")
-        #     except Exception as e:
-        #         st.warning(f"⚠️ 자동 정보 수집 중 오류가 발생했습니다: {str(e)}")
+        # 기본 조언인 경우 자동 크롤링 트리거
+        if needs_crawling:
+            try:
+                st.info("🔍 새로운 증상이 감지되었습니다. 관련 정보를 수집 중입니다...")
+                # 백그라운드에서 자동 크롤링 실행
+                auto_crawl_unhandled_symptoms()
+                st.success("✅ 새로운 의료 정보가 수집되었습니다. 다음에 더 정확한 조언을 제공할 수 있습니다.")
+            except Exception as e:
+                st.warning(f"⚠️ 자동 정보 수집 중 오류가 발생했습니다: {str(e)}")
