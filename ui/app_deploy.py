@@ -940,8 +940,8 @@ if submitted:
         #         processing_time=processing_time,
         #         session_id=session_id
         #     )
-        except Exception as e:
-            pass
+        # except Exception as e:
+        #     pass
         
         # 기본 조언인 경우 자동 크롤링 트리거 (배포용에서는 비활성화)
         # if is_default_advice:
