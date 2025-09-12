@@ -71,3 +71,4 @@ nohup.out
 
 # Streamlit
 .streamlit/
+.streamlit/secrets.toml
