@@ -29,6 +29,7 @@ class SymptomLogger:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
                 user_input TEXT NOT NULL,
+                advice_content TEXT,
                 image_uploaded BOOLEAN DEFAULT FALSE,
                 rag_results_count INTEGER DEFAULT 0,
                 rag_confidence REAL DEFAULT 0.0,
@@ -43,6 +44,13 @@ class SymptomLogger:
                 session_id TEXT
             )
         """)
+        
+        # 기존 테이블에 advice_content 컬럼 추가 (이미 존재하는 경우 무시)
+        try:
+            cursor.execute("ALTER TABLE symptom_logs ADD COLUMN advice_content TEXT")
+        except sqlite3.OperationalError:
+            # 컬럼이 이미 존재하는 경우 무시
+            pass
         
         # 미처리 증상 분석 테이블
         cursor.execute("""
@@ -80,6 +88,7 @@ class SymptomLogger:
     
     def log_symptom(self, 
                     user_input: str,
+                    advice_content: str = None,
                     image_uploaded: bool = False,
                     rag_results: List[Tuple[str, float]] = None,
                     advice_generated: bool = False,
@@ -104,14 +113,15 @@ class SymptomLogger:
         
         cursor.execute("""
             INSERT INTO symptom_logs (
-                timestamp, user_input, image_uploaded, rag_results_count,
+                timestamp, user_input, advice_content, image_uploaded, rag_results_count,
                 rag_confidence, advice_generated, advice_quality,
                 hospital_found, pharmacy_found, location_lat, location_lon,
                 processing_time, error_message, session_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             datetime.now().isoformat(),
             user_input,
+            advice_content,
             image_uploaded,
             rag_count,
             rag_confidence,
@@ -134,6 +144,44 @@ class SymptomLogger:
         self._analyze_unhandled_symptom(user_input, rag_confidence, advice_generated)
         
         return log_id
+    
+    def get_recent_logs(self, limit: int = 10) -> List[Dict]:
+        """최근 로그를 조회합니다."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, timestamp, user_input, advice_content, image_uploaded, 
+                   rag_results_count, rag_confidence, advice_generated, advice_quality,
+                   hospital_found, pharmacy_found, location_lat, location_lon,
+                   processing_time, error_message, session_id
+            FROM symptom_logs 
+            ORDER BY timestamp DESC 
+            LIMIT ?
+        """, (limit,))
+        
+        columns = [description[0] for description in cursor.description]
+        logs = []
+        
+        for row in cursor.fetchall():
+            log_dict = dict(zip(columns, row))
+            # None 값들을 적절한 기본값으로 변환
+            for key, value in log_dict.items():
+                if value is None:
+                    if key in ['advice_content', 'error_message', 'session_id']:
+                        log_dict[key] = ''
+                    elif key in ['image_uploaded', 'advice_generated', 'hospital_found', 'pharmacy_found']:
+                        log_dict[key] = False
+                    elif key in ['rag_results_count']:
+                        log_dict[key] = 0
+                    elif key in ['rag_confidence', 'processing_time']:
+                        log_dict[key] = 0.0
+                    elif key in ['location_lat', 'location_lon']:
+                        log_dict[key] = None
+            logs.append(log_dict)
+        
+        conn.close()
+        return logs
     
     def _analyze_unhandled_symptom(self, user_input: str, rag_confidence: float, advice_generated: bool):
         """미처리 증상인지 분석하고 기록합니다."""

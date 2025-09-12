@@ -14,7 +14,7 @@ def main():
     
     # 필요한 디렉토리 생성
     os.makedirs('logs', exist_ok=True)
-    os.makedirs('data/symptom_logs.db', exist_ok=True)
+    os.makedirs('data', exist_ok=True)
     
     # Streamlit 앱 실행
     try:

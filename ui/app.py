@@ -356,8 +356,9 @@ def simple_image_screening(img: Image.Image) -> List[str]:
 
 def detect_emergency_from_image(img: Image.Image, raw_image: bytes = None) -> List[str]:
     reasons: List[str] = []
-    red_thr = 0.25
-    burn_thr = 0.30
+    # 환경변수에서 임계값 가져오기 (기본값 사용)
+    red_thr = float(os.getenv("IMG_RED_RATIO", "0.25"))
+    burn_thr = float(os.getenv("IMG_BURN_RATIO", "0.30"))
     
     # 휴리스틱 분석
     try:
@@ -941,6 +942,7 @@ if submitted:
         try:
             log_id = symptom_logger.log_symptom(
                 user_input=symptoms,
+                advice_content=advice,
                 image_uploaded=image_uploaded,
                 rag_results=rag_results,
                 advice_generated=bool(advice),
