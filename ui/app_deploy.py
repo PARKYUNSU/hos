@@ -16,9 +16,9 @@ import time
 import sys
 from datetime import datetime
 
-# 백엔드 서비스 임포트 (배포용 - 로깅 제외)
+# 백엔드 서비스 임포트 (배포용 - 로깅 포함)
 sys.path.append('backend')
-# from services_logging import symptom_logger
+from services_logging import symptom_logger
 # from services_auto_crawler import auto_crawl_unhandled_symptoms
 from services_advanced_rag import GLOBAL_ADVANCED_RAG, load_disk_passages
 from services_gen import generate_advice
@@ -940,22 +940,22 @@ if submitted:
         if not test_mode and loc and 'latitude' in loc and 'longitude' in loc:
             location_coords = (loc['latitude'], loc['longitude'])
         
-        # 로그 기록 (배포용에서는 비활성화)
-        # try:
-        #     log_id = symptom_logger.log_symptom(
-        #         user_input=symptoms,
-        #         image_uploaded=image_uploaded,
-        #         rag_results=rag_results,
-        #         advice_generated=bool(advice),
-        #         advice_quality=advice_quality,
-        #         hospital_found=len(nearby_hospitals) > 0,
-        #         pharmacy_found=len(nearby_pharmacies) > 0,
-        #         location=location_coords,
-        #         processing_time=processing_time,
-        #         session_id=session_id
-        #     )
-        # except Exception as e:
-        #     pass
+        # 로그 기록 (배포용에서도 활성화)
+        try:
+            log_id = symptom_logger.log_symptom(
+                user_input=symptoms,
+                image_uploaded=image_uploaded,
+                rag_results=rag_results,
+                advice_generated=bool(advice),
+                advice_quality=advice_quality,
+                hospital_found=len(nearby_hospitals) > 0,
+                pharmacy_found=len(nearby_pharmacies) > 0,
+                location=location_coords,
+                processing_time=processing_time,
+                session_id=session_id
+            )
+        except Exception as e:
+            pass
         
         # 기본 조언인 경우 자동 크롤링 트리거 (배포용에서는 비활성화)
         # if is_default_advice:
