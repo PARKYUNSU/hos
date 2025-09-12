@@ -8,7 +8,7 @@ import streamlit as st
 def get_client() -> Optional[OpenAI]:
     # Streamlit Cloud에서는 st.secrets 사용, 로컬에서는 os.getenv 사용
     try:
-        api_key = st.secrets["OPENAI_API_KEY"]
+        api_key = st.secrets['secrets']['OPENAI_API_KEY']
     except:
         api_key = os.getenv("OPENAI_API_KEY")
     
