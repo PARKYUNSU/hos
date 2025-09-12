@@ -8,7 +8,11 @@ def get_client() -> Optional[OpenAI]:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return None
-    return OpenAI(api_key=api_key)
+    try:
+        return OpenAI(api_key=api_key)
+    except Exception as e:
+        print(f"OpenAI 클라이언트 초기화 오류: {e}")
+        return None
 
 
 SYSTEM_PROMPT = (

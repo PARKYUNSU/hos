@@ -17,8 +17,9 @@ import sys
 from datetime import datetime
 
 # 백엔드 서비스 임포트 (배포용 - 로깅 제외)
-# sys.path.append('backend')
+sys.path.append('backend')
 # from services_logging import symptom_logger
+from services_gen import generate_advice
 
 st.set_page_config(page_title="응급 챗봇", page_icon="🚑", layout="centered")
 st.title("응급 환자 챗봇 (일본)")
@@ -577,6 +578,28 @@ if submitted:
         rule_out = simple_text_rules(symptoms)
         advice = rule_out["advice"]
         otc = rule_out["otc"]
+        
+        # LLM을 사용한 고급 조언 생성 (API 키가 있는 경우)
+        try:
+            # RAG 검색 결과 준비
+            rag_passages = []
+            if hits:
+                rag_passages = [hit[0] for hit in hits[:3]]  # 상위 3개 문서
+            
+            # 이미지 분석 결과 준비
+            image_findings = []
+            if uploaded_file:
+                # 이미지 분석 로직 (간단한 버전)
+                image_findings = ["이미지 분석됨"]
+            
+            # LLM 조언 생성
+            if rag_passages or image_findings:
+                llm_advice = generate_advice(symptoms, image_findings, rag_passages)
+                if llm_advice and not llm_advice.startswith("증상에 대한 일반 조언입니다"):
+                    advice = llm_advice
+        except Exception as e:
+            # LLM 오류 시 기본 조언 사용
+            pass
         
         # 디버깅 정보
         st.write(f"🔍 디버깅: 입력된 증상 = '{symptoms}'")
