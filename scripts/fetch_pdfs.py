@@ -20,13 +20,17 @@ SEED_URLS = [
     "https://www.jrc.or.jp/activity/disaster/",
     # 消防庁: 応急手当・救急受診関連
     "https://www.fdma.go.jp/publication/",
+    "https://www.fdma.go.jp/relocation/fieldList.html?category=hazard",
+    "https://www.fdma.go.jp/relocation/fieldList.html?category=safety",
     "https://www.fdma.go.jp/mission/safety/index.html",
     # 厚生労働省: 健康・医療情報
     "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/kenkou_iryou/iryou/",
     "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/kenkou_iryou/",
+    "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/0000187997_00002.html",
     # PMDA: 患者向け医薬品等情報
     "https://www.pmda.go.jp/safety/infoservices/forpatients/otc/",
     "https://www.pmda.go.jp/patients/medicine/",
+    "https://www.pmda.go.jp/safety/infoservices/forpatients/medicine-guide/",
     # RAD-AR: くすりのしおり
     "https://www.rad-ar.or.jp/siori/",
 ]
@@ -37,7 +41,7 @@ KEYWORDS = [
     # 의약/복용/부작용
     "医薬品", "くすり", "薬", "服用", "副作用",
     # 증상/상황
-    "発熱", "咳", "呼吸困難", "アレルギー", "虫刺され", "やけど", "出血",
+    "発熱", "咳", "呼吸困難", "アレルギー", "アナフィラキシー", "虫刺され", "ハチ刺され", "やけど", "熱中症", "出血", "止血", "骨折", "捻挫",
 ]
 
 HEADERS = {
@@ -108,8 +112,8 @@ def extract_pdf_links(base_url: str, html: str) -> list[tuple[str, str]]:
         if not href or not href.lower().endswith(".pdf"):
             continue
         title = a.get_text(strip=True) or href.split("/")[-1]
-        if any(k in title for k in KEYWORDS) or any(k in href for k in KEYWORDS):
-            results.append((title, href))
+        # Relaxed: accept all PDFs in allowed domains (keywords optional)
+        results.append((title, href))
     # de-dupe by URL
     seen = set()
     uniq: list[tuple[str, str]] = []
@@ -121,7 +125,7 @@ def extract_pdf_links(base_url: str, html: str) -> list[tuple[str, str]]:
     return uniq
 
 
-def crawl_seed(session: requests.Session, seed: str, max_pages: int = 120, max_pdfs: int = 40) -> list[tuple[str, str]]:
+def crawl_seed(session: requests.Session, seed: str, max_pages: int = 160, max_pdfs: int = 60) -> list[tuple[str, str]]:
     queue: list[str] = [seed]
     visited: set[str] = set()
     found_pdfs: list[tuple[str, str]] = []
@@ -129,7 +133,7 @@ def crawl_seed(session: requests.Session, seed: str, max_pages: int = 120, max_p
     with cf.ThreadPoolExecutor(max_workers=6) as executor:
         while queue and len(visited) < max_pages and len(found_pdfs) < max_pdfs:
             batch: list[str] = []
-            while queue and len(batch) < 8:
+            while queue and len(batch) < 10:
                 url = queue.pop(0)
                 if url in visited:
                     continue
@@ -218,8 +222,34 @@ def main() -> None:
         seen.add(u)
         unique.append((t, u))
 
-    # limit to avoid over-fetch (site crawl)
-    unique = unique[:35]
+    # domain-balanced selection (avoid single domain dominance)
+    from collections import defaultdict, deque
+    by_domain: dict[str, deque[tuple[str, str]]] = defaultdict(deque)
+    for t, u in unique:
+        d = urlparse(u).netloc
+        by_domain[d].append((t, u))
+
+    balanced: list[tuple[str, str]] = []
+    max_total = 60
+    max_per_domain = 20
+    # trim per-domain queues
+    for d, q in by_domain.items():
+        while len(q) > max_per_domain:
+            q.pop()
+    # round-robin pick
+    while len(balanced) < max_total and any(by_domain.values()):
+        removed = []
+        for d, q in by_domain.items():
+            if not q:
+                removed.append(d)
+                continue
+            balanced.append(q.popleft())
+            if len(balanced) >= max_total:
+                break
+        for d in removed:
+            by_domain.pop(d, None)
+
+    unique = balanced
 
     paths: list[str] = []
     with cf.ThreadPoolExecutor(max_workers=4) as ex:
@@ -271,6 +301,14 @@ def main() -> None:
                 urls.extend(extract_pdf_links_from_search(r.text, domain))
         except Exception:
             pass
+        try:
+            # Yandex as additional source
+            q = f"site:{domain} {keyword} filetype:pdf"
+            r = session.get("https://yandex.com/search/", params={"text": q}, timeout=20)
+            if r.status_code == 200:
+                urls.extend(extract_pdf_links_from_search(r.text, domain))
+        except Exception:
+            pass
         # de-dupe
         seen3 = set()
         out: list[str] = []
@@ -316,7 +354,7 @@ def main() -> None:
         extra.append((t, u))
 
     # cap extra
-    extra = extra[:30]
+    extra = extra[:60]
 
     with cf.ThreadPoolExecutor(max_workers=6) as ex:
         futures = [ex.submit(download_pdf, session, t, u, out_dir) for t, u in extra]
