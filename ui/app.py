@@ -653,6 +653,21 @@ def load_rag():
     """고도화된 RAG 시스템 로드"""
     return GLOBAL_ADVANCED_RAG
 
+@st.cache_data(ttl=3600)  # 1시간 캐시
+def search_hospitals_cached(lat: float, lon: float, radius: int = 2000):
+    """병원 검색 (캐시됨)"""
+    return search_hospitals(lat, lon, radius)
+
+@st.cache_data(ttl=3600)  # 1시간 캐시
+def search_pharmacies_cached(lat: float, lon: float, radius: int = 1500):
+    """약국 검색 (캐시됨)"""
+    return search_pharmacies(lat, lon, radius)
+
+@st.cache_data(ttl=1800)  # 30분 캐시
+def radar_search_cached(keyword: str, limit: int = 3):
+    """의약품 검색 (캐시됨)"""
+    return radar_search(keyword, limit)
+
 # RAG 로드
 rag = load_rag()
 
@@ -748,7 +763,7 @@ if submitted:
             advice = rule_out["advice"]
             otc = rule_out["otc"]
         
-        # 지오 검색
+        # 지오 검색 (병렬 처리)
         nearby_hospitals = []
         nearby_pharmacies = []
         try:
@@ -770,8 +785,19 @@ if submitted:
                     lat, lon = 35.676203, 139.650311  # Tokyo fallback
                     st.warning(f"⚠️ 위치 검색 실패, 도쿄 기본 위치 사용: ({lat:.4f}, {lon:.4f})")
             
-            nearby_hospitals = search_hospitals(lat, lon, 2000)
-            nearby_pharmacies = search_pharmacies(lat, lon, 1500)
+            # 병렬 처리로 병원과 약국 동시 검색 (캐시 활용)
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                future_hospitals = executor.submit(search_hospitals_cached, lat, lon, 2000)
+                future_pharmacies = executor.submit(search_pharmacies_cached, lat, lon, 1500)
+                
+                try:
+                    nearby_hospitals = future_hospitals.result(timeout=10)
+                    nearby_pharmacies = future_pharmacies.result(timeout=10)
+                except concurrent.futures.TimeoutError:
+                    st.warning("⚠️ 위치 검색 시간 초과, 일부 결과만 표시됩니다.")
+                    nearby_hospitals = future_hospitals.result(timeout=1) if future_hospitals.done() else []
+                    nearby_pharmacies = future_pharmacies.result(timeout=1) if future_pharmacies.done() else []
         except Exception as e:
             st.error(f"위치 검색 오류: {str(e)}")
             pass
@@ -877,7 +903,7 @@ if submitted:
                 else:
                     st.success(f"✅ RAG 신뢰도가 양호합니다 ({rag_confidence:.1%})")
             
-            # 의약품 검색 섹션
+            # 의약품 검색 섹션 (병렬 처리)
             if otc:
                 st.subheader("일본 의약품 정보 검색")
                 drug_keywords = []
@@ -895,24 +921,40 @@ if submitted:
                 
                 if drug_keywords:
                     with st.spinner("일본 의약품 정보를 검색 중..."):
-                        for keyword in drug_keywords[:2]:  # 최대 2개 키워드만 검색
-                            try:
-                                drug_results = radar_search(keyword, limit=3)
-                                if drug_results:
-                                    st.write(f"**{keyword} 관련 의약품:**")
-                                    for drug in drug_results:
-                                        with st.expander(f"💊 {drug.get('brand', 'Unknown')}"):
-                                            if drug.get('company'):
-                                                st.write(f"**제조사:** {drug['company']}")
-                                            if drug.get('active_ingredient'):
-                                                st.write(f"**주성분:** {drug['active_ingredient']}")
-                                            if drug.get('dosage_form'):
-                                                st.write(f"**제형:** {drug['dosage_form']}")
-                                            if drug.get('url'):
-                                                st.link_button("상세 정보 보기", drug['url'])
-                            except Exception as e:
-                                st.write(f"의약품 정보 검색 중 오류: {keyword}")
-                                continue
+                        # 병렬 처리로 여러 키워드 동시 검색
+                        import concurrent.futures
+                        drug_results_all = {}
+                        
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                            # 최대 2개 키워드만 병렬 검색 (캐시 활용)
+                            future_to_keyword = {
+                                executor.submit(radar_search_cached, keyword, 3): keyword 
+                                for keyword in drug_keywords[:2]
+                            }
+                            
+                            for future in concurrent.futures.as_completed(future_to_keyword, timeout=15):
+                                keyword = future_to_keyword[future]
+                                try:
+                                    drug_results = future.result(timeout=10)
+                                    if drug_results:
+                                        drug_results_all[keyword] = drug_results
+                                except Exception as e:
+                                    st.write(f"의약품 정보 검색 중 오류: {keyword} - {str(e)}")
+                                    continue
+                        
+                        # 결과 표시
+                        for keyword, drug_results in drug_results_all.items():
+                            st.write(f"**{keyword} 관련 의약품:**")
+                            for drug in drug_results:
+                                with st.expander(f"💊 {drug.get('brand', 'Unknown')}"):
+                                    if drug.get('company'):
+                                        st.write(f"**제조사:** {drug['company']}")
+                                    if drug.get('active_ingredient'):
+                                        st.write(f"**주성분:** {drug['active_ingredient']}")
+                                    if drug.get('dosage_form'):
+                                        st.write(f"**제형:** {drug['dosage_form']}")
+                                    if drug.get('url'):
+                                        st.link_button("상세 정보 보기", drug['url'])
             
             st.caption("일본 현지 드럭스토어/약국(Matsumoto Kiyoshi, Welcia 등)에서 구매 가능")
         
@@ -956,7 +998,7 @@ if submitted:
         except Exception as e:
             pass
         
-        # RAG 성능이 부족한 경우 자동 크롤링 트리거
+        # RAG 성능이 부족한 경우 자동 크롤링 트리거 (백그라운드 실행)
         if needs_crawling:
             try:
                 if is_default_advice:
@@ -964,8 +1006,17 @@ if submitted:
                 else:
                     st.info(f"🔍 RAG 신뢰도가 낮습니다 ({rag_confidence:.1%}). 더 정확한 정보를 수집 중입니다...")
                 
-                # 백그라운드에서 자동 크롤링 실행
-                auto_crawl_unhandled_symptoms()
-                st.success("✅ 새로운 의료 정보가 수집되었습니다. 다음에 더 정확한 조언을 제공할 수 있습니다.")
+                # 백그라운드에서 자동 크롤링 실행 (사용자 응답을 블록하지 않음)
+                import threading
+                def background_crawl():
+                    try:
+                        auto_crawl_unhandled_symptoms()
+                    except Exception as e:
+                        print(f"백그라운드 크롤링 오류: {e}")
+                
+                crawl_thread = threading.Thread(target=background_crawl, daemon=True)
+                crawl_thread.start()
+                
+                st.success("✅ 새로운 의료 정보 수집이 시작되었습니다. 다음에 더 정확한 조언을 제공할 수 있습니다.")
             except Exception as e:
                 st.warning(f"⚠️ 자동 정보 수집 중 오류가 발생했습니다: {str(e)}")
