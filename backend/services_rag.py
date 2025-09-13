@@ -59,6 +59,26 @@ class HybridRAG:
             '심정지': ['心停止', '心臓停止']
         }
 
+    def _source_weight(self, passage: str) -> float:
+        """권위 있는 출처에 가중치 적용"""
+        text = (passage or "")
+        w = 1.0
+        # 기관/도메인 기반 가중치
+        if any(k in text for k in ["fdma.go.jp", "消防庁", "binran", "handbook"]):
+            w *= 1.25
+        if any(k in text for k in ["mhlw.go.jp", "厚生労働省", "0000"]):
+            w *= 1.25
+        if any(k in text for k in ["pmda.go.jp", "PMDA", "患者向け医薬品"]):
+            w *= 1.20
+        if any(k in text for k in ["rad-ar.or.jp", "くすりのしおり"]):
+            w *= 1.15
+        if any(k in text for k in ["日本赤十字", "赤十字", "救護規則"]):
+            w *= 1.10
+        # 응급 핵심 키워드 보정
+        if any(k in text for k in ["応急手当", "救急", "救急受診", "止血", "やけど", "アナフィラキシー"]):
+            w *= 1.05
+        return w
+
     def _tokenize(self, text: str) -> List[str]:
         # 다국어 토큰화 (한국어, 일본어, 영어 모두 지원)
         # 한국어와 일본어는 공백으로 분리, 영어는 단어 경계로 분리
@@ -105,8 +125,12 @@ class HybridRAG:
         q_vec = self.vectorizer.transform([enhanced_query])
         tf_scores = cosine_similarity(q_vec, self.tfidf)[0]
         
-        # 간단한 late fusion
-        scores = [(i, 0.6 * bm_scores[i] + 0.4 * tf_scores[i]) for i in range(len(self.passages))]
+        # 간단한 late fusion + 출처 가중치
+        scores = []
+        for i in range(len(self.passages)):
+            base = 0.6 * bm_scores[i] + 0.4 * tf_scores[i]
+            weight = self._source_weight(self.passages[i])
+            scores.append((i, base * weight))
         scores.sort(key=lambda x: x[1], reverse=True)
         idxs = [i for i, _ in scores[:top_k]]
         return [(self.passages[i], float(scores[j][1])) for j, i in enumerate(idxs)]
