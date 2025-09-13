@@ -5,7 +5,7 @@
 ## ✨ 주요 기능
 
 ### 🤖 AI 기반 진단
-- **OpenAI Vision API**: 상처/화상 이미지 분석
+- **Vision AI**: 상처/화상 이미지 분석
 - **RAG 시스템**: 일본 의료 데이터 기반 조언
 - **규칙 기반 시스템**: 기본 응급처치 가이드
 
@@ -41,7 +41,7 @@ pip install -r requirements.txt
 ### 3. 환경변수 설정
 `.env` 파일 생성:
 ```env
-OPENAI_API_KEY=your_openai_api_key_here
+AI_API_KEY=your_ai_api_key_here
 IMG_RED_RATIO=0.3
 IMG_BURN_RATIO=0.2
 TRIAGE_API_URL=https://your-triage-api-url.com
@@ -120,7 +120,7 @@ hos/
 ### 환경변수 설정 (Streamlit Cloud)
 ```toml
 [secrets]
-OPENAI_API_KEY = "sk-your-openai-api-key-here"
+AI_API_KEY = "your-ai-api-key-here"
 IMG_RED_RATIO = "0.3"
 IMG_BURN_RATIO = "0.2"
 TRIAGE_API_URL = "https://your-triage-api-url.com"
@@ -164,6 +164,25 @@ python setup_env.py
 - 관리자 대시보드에서 실시간 통계 확인
 - 증상 처리 성공률 모니터링
 - RAG 데이터 품질 분석
+
+## 🚀 향후 고도화 계획
+
+현재 프로젝트는 핵심 기능 구현이 완료되었으며, 더욱 정교한 의료 지원 서비스로 발전시키기 위해 다음과 같은 추가 기술 도입을 계획하고 있습니다:
+
+### AI 모델 고도화
+- **다중 LLM 통합**: 다양한 대규모 언어 모델의 장점을 결합한 앙상블 시스템
+- **의료 전문 모델**: 의료 도메인에 특화된 파인튜닝된 모델 활용
+- **멀티모달 융합**: 텍스트, 이미지, 음성을 통합한 종합적 증상 분석
+
+### 실시간 데이터 연동
+- **의료 기관 API**: 일본 주요 병원 및 약국의 실시간 데이터 연동
+- **의약품 데이터베이스**: 정부 승인 의약품 정보 실시간 업데이트
+- **응급실 현황**: 실시간 병상 및 대기시간 정보 제공
+
+### 개인화 및 학습
+- **사용자 프로필**: 개인 의료 이력 기반 맞춤형 조언
+- **연속 학습**: 사용자 피드백을 통한 모델 성능 지속 개선
+- **예측 분석**: 증상 패턴 분석을 통한 예방적 의료 조언
 
 ## 🤝 기여
 
