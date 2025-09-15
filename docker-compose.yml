@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  hos-app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - AUTO_REINDEX_ON_CRAWL=1
+      - REINDEX_DEBOUNCE_SEC=120
+      - USE_PLAYWRIGHT_CRAWLING=1
+      - PW_HEADLESS=1
+      - CRAWL_MAX_LINKS_PER_SITE=8
+      - IMG_RED_RATIO=0.3
+      - IMG_BURN_RATIO=0.2
+      - FAST_MODE=false
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 선택적: Redis for caching (향후 확장용)
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   restart: unless-stopped
+
+  # 선택적: PostgreSQL for production database (향후 확장용)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   environment:
+  #     POSTGRES_DB: hos_db
+  #     POSTGRES_USER: hos_user
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+volumes:
+  # redis_data:
+  # postgres_data:

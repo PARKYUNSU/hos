@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HOS 응급 의료 챗봇</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container-fluid">
+        <!-- 헤더 -->
+        <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
+            <div class="container">
+                <a class="navbar-brand" href="/">
+                    <i class="fas fa-hospital"></i> HOS 응급 의료 챗봇
+                </a>
+                <div class="navbar-nav ms-auto">
+                    <a class="nav-link" href="/admin">
+                        <i class="fas fa-cog"></i> 관리자
+                    </a>
+                </div>
+            </div>
+        </nav>
+
+        <div class="container">
+            <!-- 메인 컨텐츠 -->
+            <div class="row">
+                <div class="col-lg-8 mx-auto">
+                    <div class="card shadow">
+                        <div class="card-header bg-primary text-white">
+                            <h4 class="mb-0">
+                                <i class="fas fa-stethoscope"></i> 
+                                일본 여행 응급 의료 조언
+                            </h4>
+                        </div>
+                        <div class="card-body">
+                            <!-- 증상 입력 폼 -->
+                            <form id="symptomForm" enctype="multipart/form-data">
+                                <div class="mb-3">
+                                    <label for="symptom" class="form-label">
+                                        <i class="fas fa-comment-medical"></i> 증상을 설명해주세요
+                                    </label>
+                                    <textarea 
+                                        class="form-control" 
+                                        id="symptom" 
+                                        name="symptom" 
+                                        rows="3" 
+                                        placeholder="예: 머리가 아파요, 열이 나요, 가슴이 답답해요..."
+                                        required
+                                    ></textarea>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="image" class="form-label">
+                                        <i class="fas fa-camera"></i> 증상 사진 (선택사항)
+                                    </label>
+                                    <input 
+                                        type="file" 
+                                        class="form-control" 
+                                        id="image" 
+                                        name="image" 
+                                        accept="image/*"
+                                    >
+                                    <div class="form-text">상처, 발진 등의 증상을 촬영해주세요</div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="location" class="form-label">
+                                        <i class="fas fa-map-marker-alt"></i> 현재 위치 (선택사항)
+                                    </label>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <input 
+                                                type="number" 
+                                                class="form-control" 
+                                                id="latitude" 
+                                                placeholder="위도 (예: 35.6762)"
+                                                step="any"
+                                            >
+                                        </div>
+                                        <div class="col-md-6">
+                                            <input 
+                                                type="number" 
+                                                class="form-control" 
+                                                id="longitude" 
+                                                placeholder="경도 (예: 139.6503)"
+                                                step="any"
+                                            >
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="getCurrentLocation()">
+                                        <i class="fas fa-location-arrow"></i> 현재 위치 가져오기
+                                    </button>
+                                </div>
+
+                                <div class="d-grid">
+                                    <button type="submit" class="btn btn-primary btn-lg" id="submitBtn">
+                                        <i class="fas fa-search"></i> 의료 조언 받기
+                                    </button>
+                                </div>
+                            </form>
+
+                            <!-- 로딩 표시 -->
+                            <div id="loading" class="text-center mt-4" style="display: none;">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">처리 중...</span>
+                                </div>
+                                <p class="mt-2">의료 조언을 생성하고 있습니다...</p>
+                            </div>
+
+                            <!-- 결과 표시 -->
+                            <div id="result" class="mt-4" style="display: none;">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5 class="mb-0">
+                                            <i class="fas fa-user-md"></i> 의료 조언
+                                        </h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="adviceContent"></div>
+                                        
+                                        <div id="otcSection" class="mt-3" style="display: none;">
+                                            <h6><i class="fas fa-pills"></i> 권장 OTC 약품</h6>
+                                            <ul id="otcList"></ul>
+                                        </div>
+
+                                        <div class="row mt-3">
+                                            <div class="col-md-6">
+                                                <small class="text-muted">
+                                                    <i class="fas fa-chart-line"></i> 
+                                                    RAG 신뢰도: <span id="ragConfidence"></span>
+                                                </small>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <small class="text-muted">
+                                                    <i class="fas fa-clock"></i> 
+                                                    처리 시간: <span id="processingTime"></span>초
+                                                </small>
+                                            </div>
+                                        </div>
+
+                                        <div id="crawlingNotice" class="alert alert-info mt-3" style="display: none;">
+                                            <i class="fas fa-info-circle"></i>
+                                            관련 정보를 수집하고 있습니다. 잠시 후 더 정확한 조언을 제공할 수 있습니다.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 오류 표시 -->
+                            <div id="error" class="alert alert-danger mt-4" style="display: none;">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <span id="errorMessage"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 안전 안내 -->
+                    <div class="card mt-4">
+                        <div class="card-body">
+                            <h6><i class="fas fa-exclamation-triangle text-warning"></i> 중요 안내</h6>
+                            <ul class="mb-0">
+                                <li>이 서비스는 응급상황에서의 <strong>일반적인 조언</strong>을 제공합니다</li>
+                                <li>심각한 증상이 있다면 <strong>즉시 119에 신고</strong>하세요</li>
+                                <li>의학적 진단이 아닌 <strong>응급처치 및 OTC 약품 조언</strong>입니다</li>
+                                <li>지속되는 증상은 <strong>의료진 상담</strong>을 받으세요</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
