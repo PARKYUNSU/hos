@@ -867,7 +867,9 @@ def show_system_settings():
         'MVP_FIXED_LAT': 'MVP 고정 위도',
         'MVP_FIXED_LON': 'MVP 고정 경도',
         'FAST_MODE': '빠른 모드',
-        'CONTACT_EMAIL': '연락처 이메일'
+        'CONTACT_EMAIL': '연락처 이메일',
+        'AUTO_REINDEX_ON_CRAWL': '크롤링 후 자동 재색인',
+        'REINDEX_DEBOUNCE_SEC': '자동 재색인 디바운스(초)'
     }
     
     # 기본값 설정
@@ -879,7 +881,9 @@ def show_system_settings():
         'MVP_FIXED_LAT': '35.6762',
         'MVP_FIXED_LON': '139.6503',
         'FAST_MODE': 'false',
-        'CONTACT_EMAIL': 'hos-emergency-bot@example.com'
+        'CONTACT_EMAIL': 'hos-emergency-bot@example.com',
+        'AUTO_REINDEX_ON_CRAWL': '1',
+        'REINDEX_DEBOUNCE_SEC': '120'
     }
     
     # 환경변수 실시간 변경

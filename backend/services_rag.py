@@ -11,11 +11,13 @@ class HybridRAG:
         self.passages = passages
         self.tokenized = [self._tokenize(p) for p in passages]
         self.bm25 = BM25Okapi(self.tokenized)
-        self.vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=8000)
+        # CJK(한/일) 교차언어 매칭 강화를 위해 문자 n-gram TF-IDF 사용
+        self.vectorizer = TfidfVectorizer(analyzer='char', ngram_range=(2, 5), max_features=25000)
         self.tfidf = self.vectorizer.fit_transform(passages)
         
         # 한국어-일본어 의료 용어 매핑
         self.korean_japanese_mapping = {
+            # 증상 일반
             '벌레 물림': ['虫刺され', '虫に刺された', '虫刺症'],
             '말벌 쏘임': ['蜂に刺された', '蜂刺症', 'ハチ刺し'],
             '모기 물림': ['蚊に刺された', '蚊刺症', '蚊刺され'],
@@ -25,17 +27,22 @@ class HybridRAG:
             '복통': ['腹痛', 'お腹が痛い', '腹部痛'],
             '구토': ['嘔吐', '吐く', '吐き気'],
             '설사': ['下痢', '下痢症'],
+            '변비': ['便秘'],
             '코피': ['鼻血', '鼻出血'],
             '손목': ['手首', '手関節'],
             '발진': ['発疹', '皮疹', '湿疹'],
+            '가려움': ['かゆみ', '掻痒', '痒み'],
+            '붓기': ['腫れ', '浮腫'],
             '마비': ['麻痺', 'しびれ', '感覚麻痺'],
             '목 아픔': ['首の痛み', '頸部痛', '首痛'],
+            '목이 아파요': ['喉の痛み', '咽頭痛', 'のどの痛み'],
             '가슴 답답': ['胸苦しい', '胸の圧迫感', '胸部不快感'],
             '호흡곤란': ['呼吸困難', '息切れ', '呼吸が苦しい'],
             '알레르기': ['アレルギー', '過敏症'],
             '응급처치': ['応急処置', '救急処置', '応急手当'],
             '눈이 부어': ['目の腫れ', '眼瞼浮腫', '眼の腫脹'],
             '눈 부어': ['目の腫れ', '眼瞼浮腫', '眼の腫脹'],
+            '눈이 가려워요': ['目のかゆみ', '眼のかゆみ', 'アレルギー性結膜炎'],
             '목소리': ['声', '音声', '発声'],
             '목소리가 나오지': ['声が出ない', '失声', '音声障害'],
             '손발이 차가워': ['手足が冷たい', '四肢冷感', '末梢循環不全'],
@@ -56,7 +63,34 @@ class HybridRAG:
             '경련': ['痙攣', 'けいれん'],
             '의식 잃음': ['意識喪失', '失神'],
             '호흡 정지': ['呼吸停止', '無呼吸'],
-            '심정지': ['心停止', '心臓停止']
+            '심정지': ['心停止', '心臓停止'],
+
+            # 약/OTC 관련 (쿼리 확장)
+            '해열제': ['解熱剤', '解熱薬', '熱さまし'],
+            '진통제': ['鎮痛剤', '鎮痛薬'],
+            '해열진통제': ['解熱鎮痛剤', '総合感冒薬'],
+            '소화제': ['消化薬', '健胃消化薬', '制酸薬', '胃薬'],
+            '기침약': ['鎮咳薬', '去痰薬', '咳止め'],
+            '콧물약': ['鼻炎用内服薬', '鼻みず', '抗ヒスタミン'],
+            '스테로이드 연고': ['ステロイド外用', '外用ステロイド'],
+            '항히스타민': ['抗ヒスタミン', 'アレルギー用薬'],
+
+            # 성분/제품명 (일부 대표 매핑)
+            '아세트아미노펜': ['アセトアミノフェン', 'タイレノール'],
+            '이부프로펜': ['イブプロフェン'],
+            '로키소닌': ['ロキソニン', 'ロキソプロフェン'],
+            '코데인': ['コデイン'],
+            '히드로코르티손': ['ヒドロコルチゾン'],
+            '로페라마이드': ['ロペラミド'],
+            '세티리진': ['セチリジン'],
+            '페키소페나딘': ['フェキソフェナジン']
+        }
+
+        # 복합 증상 문구 전용 확장 (문장 전체에 포함될 때 강제 주입)
+        self.composite_query_boosts = {
+            '어지러움과 구토': ['めまい', '嘔吐', '吐き気'],
+            '가슴이 답답하고 숨이 차': ['胸苦しい', '呼吸困難', '息切れ'],
+            '관절이 부어오르고 통증': ['関節', '腫れ', '痛み']
         }
 
     def _source_weight(self, passage: str) -> float:
@@ -77,6 +111,9 @@ class HybridRAG:
         # 응급 핵심 키워드 보정
         if any(k in text for k in ["応急手当", "救急", "救急受診", "止血", "やけど", "アナフィラキシー"]):
             w *= 1.05
+        # OTC 관련 키워드 보정
+        if any(k in text for k in ["解熱剤", "鎮痛剤", "解熱鎮痛剤", "健胃消化薬", "制酸薬", "鎮咳薬", "去痰薬", "抗ヒスタミン", "一般用医薬品", "第一類医薬品", "第二類医薬品"]):
+            w *= 1.10
         return w
 
     def _tokenize(self, text: str) -> List[str]:
@@ -102,6 +139,11 @@ class HybridRAG:
         """한국어 쿼리를 일본어로 변환합니다."""
         translated_terms = []
         
+        # 복합 문구 우선 매칭
+        for phrase, jp_terms in self.composite_query_boosts.items():
+            if phrase in query:
+                translated_terms.extend(jp_terms)
+
         # 한국어 키워드 매핑
         for korean, japanese_terms in self.korean_japanese_mapping.items():
             if korean in query:
@@ -128,7 +170,8 @@ class HybridRAG:
         # 간단한 late fusion + 출처 가중치
         scores = []
         for i in range(len(self.passages)):
-            base = 0.6 * bm_scores[i] + 0.4 * tf_scores[i]
+            # BM25는 일본어 토큰화 한계로 약하고, 문자 n-gram TF-IDF는 교차언어에 강함
+            base = 0.2 * bm_scores[i] + 0.8 * tf_scores[i]
             weight = self._source_weight(self.passages[i])
             scores.append((i, base * weight))
         scores.sort(key=lambda x: x[1], reverse=True)

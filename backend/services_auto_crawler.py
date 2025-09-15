@@ -10,20 +10,28 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
-from urllib.parse import quote
+from typing import Dict, List, Optional, Set
+from urllib.parse import quote, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
 
 try:
     from .services_logging import symptom_logger
+    from .services_playwright_crawler import (
+        is_playwright_enabled,
+        fetch_html_with_playwright,
+    )
 except ImportError:
     # Streamlit Cloud에서 상대 import가 실패할 경우를 대비
     import sys
     import os
     sys.path.append(os.path.dirname(__file__))
     from services_logging import symptom_logger
+    from services_playwright_crawler import (
+        is_playwright_enabled,
+        fetch_html_with_playwright,
+    )
 
 class AutoCrawler:
     """자동 크롤링 클래스"""
@@ -33,6 +41,23 @@ class AutoCrawler:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         })
+        # 도메인 화이트리스트 (우선순위 높은 공공/의료)
+        self.allowed_domains: Set[str] = set([
+            'www.jrc.or.jp', 'jrc.or.jp',
+            'www.mhlw.go.jp', 'mhlw.go.jp',
+            'www.fdma.go.jp', 'fdma.go.jp',
+            'www.pmda.go.jp', 'pmda.go.jp',
+            'www.rad-ar.or.jp', 'rad-ar.or.jp',
+            'www.jrs.or.jp', 'jrs.or.jp',
+            'www.niph.go.jp', 'niph.go.jp',
+            'www.j-circ.or.jp', 'j-circ.or.jp',
+            'www.jaam.jp', 'jaam.jp'
+        ])
+        # 링크 탐색 상한
+        try:
+            self.max_links_per_site = int(os.getenv('CRAWL_MAX_LINKS_PER_SITE', '5'))
+        except Exception:
+            self.max_links_per_site = 5
         
         # 크롤링 대상 사이트들 (실제 작동하는 사이트들로 수정)
         self.target_sites = {
@@ -52,8 +77,8 @@ class AutoCrawler:
                 'search_url': 'https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/kenkou_iryou/iryou/',
                 'selectors': {
                     'title': 'h1, h2, h3',
-                    'content': 'p, li, div.content',
-                    'links': 'a[href*="kenkou"]'
+                    'content': 'p, li, div.content, article, section',
+                    'links': 'a[href*="kenkou"], a[href*="iryou"], a[href*="/stf/"]'
                 }
             },
             'med_or_jp': {
@@ -64,6 +89,46 @@ class AutoCrawler:
                     'title': 'h1, h2, h3',
                     'content': 'p, li, div.content',
                     'links': 'a[href*="med"]'
+                }
+            },
+            'fdma': {
+                'name': '総務省消防庁 (FDMA)',
+                'base_url': 'https://www.fdma.go.jp',
+                'search_url': 'https://www.fdma.go.jp/publication/rescue/',
+                'selectors': {
+                    'title': 'h1, h2, h3',
+                    'content': 'p, li, article, section',
+                    'links': 'a[href]'
+                }
+            },
+            'pmda': {
+                'name': 'PMDA',
+                'base_url': 'https://www.pmda.go.jp',
+                'search_url': 'https://www.pmda.go.jp/guide/otc-info.html',
+                'selectors': {
+                    'title': 'h1, h2, h3',
+                    'content': 'p, li, article, section',
+                    'links': 'a[href]'
+                }
+            },
+            'rad_ar': {
+                'name': 'RAD-AR くすりのしおり',
+                'base_url': 'https://www.rad-ar.or.jp',
+                'search_url': 'https://www.rad-ar.or.jp/',
+                'selectors': {
+                    'title': 'h1, h2, h3',
+                    'content': 'p, li, article, section',
+                    'links': 'a[href]'
+                }
+            },
+            'jrs': {
+                'name': '日本呼吸器学会 (JRS)',
+                'base_url': 'https://www.jrs.or.jp',
+                'search_url': 'https://www.jrs.or.jp/',
+                'selectors': {
+                    'title': 'h1, h2, h3',
+                    'content': 'p, li, article, section',
+                    'links': 'a[href]'
                 }
             },
             'web_search': {
@@ -77,6 +142,57 @@ class AutoCrawler:
                 }
             }
         }
+        # 방문 중복 방지
+        self._visited_urls: Set[str] = set()
+
+    def _is_allowed(self, url: str) -> bool:
+        try:
+            netloc = urlparse(url).netloc.lower()
+            if not self.allowed_domains:
+                return True
+            return any(netloc.endswith(d) for d in self.allowed_domains)
+        except Exception:
+            return False
+
+    def _fetch_html(self, url: str, wait_selector: Optional[str] = None) -> Optional[str]:
+        html: Optional[str] = None
+        if 'http' in url and is_playwright_enabled():
+            html = fetch_html_with_playwright(url, wait_selector=wait_selector)
+        if not html:
+            try:
+                resp = self.session.get(url, timeout=12)
+                resp.raise_for_status()
+                # PDF 등 바이너리는 스킵
+                ctype = (resp.headers.get('content-type') or '').lower()
+                if 'pdf' in ctype:
+                    return None
+                html = resp.text
+            except Exception:
+                return None
+        return html
+
+    def _download_pdf(self, url: str) -> Optional[str]:
+        try:
+            if not url.lower().endswith('.pdf'):
+                # 콘텐츠 타입 확인
+                head = self.session.get(url, timeout=10, stream=True)
+                ctype = (head.headers.get('content-type') or '').lower()
+                if 'pdf' not in ctype:
+                    return None
+            # 다운로드
+            resp = self.session.get(url, timeout=30)
+            resp.raise_for_status()
+            out_dir = Path('data/rag_data')
+            out_dir.mkdir(parents=True, exist_ok=True)
+            name = urlparse(url).path.split('/')[-1] or 'download.pdf'
+            if not name.endswith('.pdf'):
+                name += '.pdf'
+            safe = re.sub(r'[^\w\-\.]+', '_', name)
+            path = out_dir / safe
+            path.write_bytes(resp.content)
+            return str(path)
+        except Exception:
+            return None
     
     def extract_keywords(self, symptom_text: str) -> List[str]:
         """증상 텍스트에서 키워드를 추출합니다."""
@@ -113,6 +229,22 @@ class AutoCrawler:
             '숨이 차요': ['息切れ', '呼吸困難', '呼吸が苦しい'],
             '숨이 차': ['息切れ', '呼吸困難', '呼吸が苦しい']
         }
+
+        # 일상적 표현 매핑 보강
+        korean_japanese_mapping.update({
+            '머리가 아파요': ['頭痛', '頭が痛い', '片頭痛', '緊張型頭痛', '群発頭痛', '解熱鎮痛薬'],
+            '어지러워요': ['めまい', '立ちくらみ', '良性発作性頭位めまい症', 'BPPV', '低血圧', '貧血'],
+            '가슴이 아파요': ['胸痛', '狭心症', '心筋梗塞', '肋間神経痛', '胸部圧迫感', '救急'],
+            '코피가 나요': ['鼻血', '鼻出血', '止血', '圧迫'],
+            '목이 아파요': ['喉の痛み', '咽頭炎', '扁桃炎', 'のどの痛み', 'うがい', '鎮痛解熱薬'],
+            '코막힘이 심해요': ['鼻づまり', '鼻閉', 'アレルギー性鼻炎', '点鼻薬', '抗ヒスタミン'],
+            '치통이 있어요': ['歯痛', '虫歯', '歯周炎', '鎮痛薬', '歯科'],
+            '상처가 있어요': ['傷', '外傷', '切創', '擦過傷', '止血', '消毒', 'ガーゼ'],
+            '출혈이 멈추지 않아요': ['出血', '止血', '圧迫止血', '救急'],
+            '탈수 증상이 있어요': ['脱水', '経口補水液', 'OS-1', '水分補給'],
+            '경련이 있어요': ['痙攣', 'けいれん', '発作', 'てんかん', '救急'],
+            '의식을 잃었어요': ['意識消失', '失神', '意識障害', '救急車', '119'],
+        })
         
         keywords = []
         
@@ -136,8 +268,38 @@ class AutoCrawler:
         english_words = re.findall(r'[a-zA-Z]+', symptom_text)
         keywords.extend(english_words)
         
+        # 키워드가 비었으면 간단 폴백 규칙 적용
+        if not keywords:
+            t = symptom_text
+            if '머리' in t:
+                keywords.extend(['頭痛', '解熱鎮痛薬'])
+            if ('어지' in t) or ('현기' in t):
+                keywords.extend(['めまい', '立ちくらみ'])
+            if '가슴' in t:
+                keywords.extend(['胸痛', '胸部圧迫感', '救急'])
+            if '코피' in t:
+                keywords.extend(['鼻血', '止血'])
+            if ('숨' in t) or ('호흡' in t):
+                keywords.extend(['呼吸困難', '息切れ'])
+            if ('목' in t) or ('목이' in t):
+                keywords.extend(['喉の痛み', '咽頭炎'])
+            if '코막힘' in t:
+                keywords.extend(['鼻づまり', '鼻閉'])
+            if '치통' in t or '치아' in t:
+                keywords.extend(['歯痛', '虫歯'])
+            if '상처' in t:
+                keywords.extend(['外傷', '切創', '止血'])
+            if '출혈' in t:
+                keywords.extend(['出血', '圧迫止血'])
+            if '탈수' in t:
+                keywords.extend(['脱水', '経口補水液'])
+            if '경련' in t:
+                keywords.extend(['痙攣', '発作'])
+            if ('의식' in t) or ('기절' in t):
+                keywords.extend(['意識消失', '失神', '救急車'])
+
         # 중복 제거 및 길이 필터링
-        keywords = list(set([kw for kw in keywords if len(kw) >= 2]))
+        keywords = list(set([kw for kw in keywords if isinstance(kw, str) and len(kw.strip()) >= 2]))
         
         return keywords
     
@@ -154,11 +316,15 @@ class AutoCrawler:
             # 검색 URL 구성
             search_url = site_config['search_url']
             
-            # 페이지 내용 가져오기
-            response = self.session.get(search_url, timeout=10)
-            response.raise_for_status()
+            # 페이지 내용 가져오기 (Playwright 우선, 실패 시 requests)
+            html: Optional[str] = self._fetch_html(
+                search_url,
+                wait_selector=site_config['selectors'].get('title', None),
+            )
+            if not html:
+                return results
             
-            soup = BeautifulSoup(response.content, 'html.parser')
+            soup = BeautifulSoup(html, 'html.parser')
             
             # 제목과 내용 추출
             titles = soup.select(site_config['selectors']['title'])
@@ -209,6 +375,56 @@ class AutoCrawler:
                         'url': search_url,
                         'keywords_matched': matched_keywords
                     })
+            # 링크 추적(Depth 1): 관련 링크를 방문해 본문 추출 및 PDF 저장
+            followed = 0
+            for link in links:
+                href = link.get('href')
+                if not href:
+                    continue
+                if href.startswith('/'):
+                    href = urljoin(site_config['base_url'], href)
+                if href in self._visited_urls:
+                    continue
+                self._visited_urls.add(href)
+                # 도메인 필터
+                if not self._is_allowed(href):
+                    continue
+                if href.lower().endswith('.pdf'):
+                    pdf_path = self._download_pdf(href)
+                    if pdf_path:
+                        results.append({
+                            'site': site_config['name'],
+                            'title': link.get_text().strip() or 'PDF',
+                            'content': '',
+                            'links': [],
+                            'url': href,
+                            'downloaded_pdf': pdf_path,
+                            'keywords_matched': []
+                        })
+                        followed += 1
+                        if followed >= self.max_links_per_site:
+                            break
+                    continue
+                # HTML 페이지 렌더링 수집
+                page_html = self._fetch_html(href)
+                if not page_html:
+                    continue
+                psoup = BeautifulSoup(page_html, 'html.parser')
+                body_text = psoup.get_text(separator=' ', strip=True)
+                title_elem = psoup.find(['h1', 'title'])
+                ptitle = (title_elem.get_text().strip() if title_elem else (link.get_text().strip() or ''))
+                if body_text:
+                    results.append({
+                        'site': site_config['name'],
+                        'title': ptitle[:120],
+                        'content': body_text[:1200],
+                        'links': [],
+                        'url': href,
+                        'keywords_matched': [kw for kw in keywords if kw in body_text][:5]
+                    })
+                    followed += 1
+                    if followed >= self.max_links_per_site:
+                        break
             
         except Exception as e:
             print(f"Error crawling {site_key}: {e}")
@@ -427,11 +643,42 @@ class AutoCrawler:
 # 전역 크롤러 인스턴스
 auto_crawler = AutoCrawler()
 
+def _env_flag(name: str, default: str = "0") -> bool:
+    val = os.getenv(name, default)
+    return str(val).lower() in ("1", "true", "on", "yes")
+
 def auto_crawl_unhandled_symptoms():
-    """미처리 증상에 대해 자동 크롤링을 실행합니다."""
+    """미처리 증상에 대해 자동 크롤링을 실행합니다.
+    환경변수 AUTO_REINDEX_ON_CRAWL 활성 시, 성공 건이 있으면 RAG 자동 재색인을 트리거합니다.
+    """
     try:
         result = auto_crawler.process_unhandled_symptoms()
         print(f"자동 크롤링 완료: {result['successful']}개 성공, {result['failed']}개 실패")
+
+        # 선택적 자동 재색인 (하이브리드 전략)
+        try:
+            if _env_flag("AUTO_REINDEX_ON_CRAWL", "0") and result.get('successful', 0) > 0:
+                # 디바운스: 마지막 업데이트 이후 120초 이내면 스킵
+                from .services_rag_updater import rag_updater
+                meta = rag_updater.load_metadata()
+                from datetime import datetime, timedelta
+                last = meta.get('last_update')
+                allow = True
+                if last:
+                    try:
+                        last_dt = datetime.fromisoformat(last)
+                        if datetime.now() - last_dt < timedelta(seconds=int(os.getenv('REINDEX_DEBOUNCE_SEC', '120'))):
+                            allow = False
+                    except Exception:
+                        allow = True
+                if allow:
+                    print("AUTO_REINDEX_ON_CRAWL: 업데이트 실행")
+                    rag_updater.update_rag_system()
+                else:
+                    print("AUTO_REINDEX_ON_CRAWL: 디바운스로 인해 건너뜀")
+        except Exception as e:
+            print(f"자동 재색인 트리거 오류: {e}")
+
         return result
     except Exception as e:
         print(f"자동 크롤링 오류: {str(e)}")
