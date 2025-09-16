@@ -12,6 +12,8 @@ services:
       - REINDEX_DEBOUNCE_SEC=120
       - USE_PLAYWRIGHT_CRAWLING=1
       - PW_HEADLESS=1
+      - PW_NAV_TIMEOUT_MS=15000
+      - PW_WAIT_UNTIL=networkidle
       - CRAWL_MAX_LINKS_PER_SITE=8
       - IMG_RED_RATIO=0.3
       - IMG_BURN_RATIO=0.2
