@@ -223,6 +223,22 @@ async def get_advice(
                 lat, lon = loc_data.get('lat'), loc_data.get('lon')
             except:
                 pass
+        # 위치 미지정 시 테스트 모드 기본값 적용
+        if (not lat or not lon):
+            try:
+                test_mode = os.getenv('MVP_RANDOM_TOKYO', 'false').lower() == 'true'
+                fixed_shinjuku = os.getenv('MVP_FIXED_SHINJUKU', 'false').lower() == 'true'
+                if fixed_shinjuku:
+                    lat, lon = 35.6909, 139.7006
+                elif test_mode:
+                    # 도쿄 중심 근처 랜덤 좌표
+                    import random
+                    center_lat, center_lon = 35.6762, 139.6503
+                    delta = 0.05
+                    lat = center_lat + (random.random() - 0.5) * delta
+                    lon = center_lon + (random.random() - 0.5) * delta
+            except Exception:
+                pass
         
         # 이미지 처리
         image_bytes = None
@@ -322,6 +338,7 @@ async def get_advice(
             if lat and lon:
                 # Overpass API로 간단 검색
                 def search_pois(amenity: str) -> List[Dict[str, Any]]:
+                    # Overpass에서 충분한 후보를 받아온 뒤, 거리 계산해 가까운 순 5개만 반환
                     query = f"""
                     [out:json][timeout:10];
                     (
@@ -329,13 +346,24 @@ async def get_advice(
                       way["amenity"="{amenity}"](around:2000,{lat},{lon});
                       relation["amenity"="{amenity}"](around:2000,{lat},{lon});
                     );
-                    out center 15;
+                    out center 50;
                     """
                     r = requests.post("https://overpass-api.de/api/interpreter", data={"data": query}, timeout=10)
                     r.raise_for_status()
                     js = r.json()
                     res: List[Dict[str, Any]] = []
-                    for el in js.get("elements", [])[:10]:
+
+                    def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+                        from math import radians, sin, cos, asin, sqrt
+                        R = 6371.0
+                        dlat = radians(lat2 - lat1)
+                        dlon = radians(lon2 - lon1)
+                        a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+                        c = 2 * asin(sqrt(a))
+                        return R * c
+
+                    seen = set()
+                    for el in js.get("elements", []):
                         tags = el.get("tags", {}) or {}
                         name = tags.get("name") or amenity
                         if el.get("type") == "node":
@@ -345,8 +373,16 @@ async def get_advice(
                             clat, clon = center.get("lat"), center.get("lon")
                         if clat is None or clon is None:
                             continue
-                        res.append({"name": name, "lat": clat, "lon": clon})
-                    return res
+                        # 중복 제거 (좌표 반올림 + 이름 기준)
+                        key = (name, round(float(clat), 5), round(float(clon), 5))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        dist_km = haversine(float(lat), float(lon), float(clat), float(clon))
+                        res.append({"name": name, "lat": clat, "lon": clon, "distance": dist_km})
+
+                    res.sort(key=lambda x: (x.get("distance", 1e9), x.get("name", "")))
+                    return res[:5]
                 nearby_hospitals = search_pois("hospital")
                 nearby_pharmacies = search_pois("pharmacy")
         except Exception as e:
@@ -357,7 +393,7 @@ async def get_advice(
             symptom_logger.log_symptom(
                 user_input=symptom,
                 advice_content=advice_result['advice'],
-                rag_results=hits if GLOBAL_RAG else [],
+                rag_results=merged_hits if GLOBAL_RAG else [],
                 processing_time=processing_time,
                 advice_quality='good' if rag_confidence > 0.7 else 'poor',
                 image_uploaded=bool(image_bytes),

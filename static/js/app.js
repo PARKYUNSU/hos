@@ -123,10 +123,17 @@ document.addEventListener('DOMContentLoaded', function() {
         const hospBox = document.getElementById('nearbyHospitals');
         const pharmBox = document.getElementById('nearbyPharmacies');
         if (hospBox && pharmBox) {
-            const hospitals = data.nearby_hospitals || [];
-            const pharmacies = data.nearby_pharmacies || [];
-            hospBox.innerHTML = hospitals.length ? hospitals.map(h => `<li>${h.name} (${h.lat.toFixed(5)}, ${h.lon.toFixed(5)})</li>`).join('') : '<li>검색 결과 없음</li>';
-            pharmBox.innerHTML = pharmacies.length ? pharmacies.map(p => `<li>${p.name} (${p.lat.toFixed(5)}, ${p.lon.toFixed(5)})</li>`).join('') : '<li>검색 결과 없음</li>';
+            const hospitals = (data.nearby_hospitals || []).slice(0,5);
+            const pharmacies = (data.nearby_pharmacies || []).slice(0,5);
+            const toItem = (x) => {
+                const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(x.name)}&query=${encodeURIComponent((x.lat||'') + ',' + (x.lon||''))}`;
+                return `<li class="mb-1 d-flex justify-content-between align-items-center">
+                    <span>${x.name}${x.distance!=null?` <small class="text-muted">(${x.distance.toFixed(1)}km)</small>`:''}</span>
+                    <a class="btn btn-sm btn-outline-primary" href="${url}" target="_blank"><i class="fas fa-map"></i> 지도</a>
+                </li>`;
+            };
+            hospBox.innerHTML = hospitals.length ? hospitals.map(toItem).join('') : '<li>검색 결과 없음</li>';
+            pharmBox.innerHTML = pharmacies.length ? pharmacies.map(toItem).join('') : '<li>검색 결과 없음</li>';
             document.getElementById('poiSection').style.display = (hospitals.length || pharmacies.length) ? 'block' : 'none';
         }
     }
