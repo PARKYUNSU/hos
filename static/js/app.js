@@ -68,8 +68,10 @@ document.addEventListener('DOMContentLoaded', function() {
         submitBtn.disabled = false;
         
         // 조언 내용 표시
-        document.getElementById('adviceContent').innerHTML = 
-            `<div class="alert alert-info">${data.advice.replace(/\n/g, '<br>')}</div>`;
+        // 마크다운 렌더 (XSS 방지 위해 DOMPurify 사용)
+        const md = typeof marked !== 'undefined' ? marked.parse(data.advice || '') : (data.advice || '').replace(/\n/g,'<br>');
+        const safe = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(md) : md;
+        document.getElementById('adviceContent').innerHTML = `<div class="alert alert-info">${safe}</div>`;
         
         // OTC 약품 표시
         const otcSection = document.getElementById('otcSection');
