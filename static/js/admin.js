@@ -275,6 +275,40 @@ async function loadSettings() {
                 </div>
             </div>
         </div>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="mb-3">
+                    <label class="form-label">MVP_RANDOM_TOKYO (테스트 모드)</label>
+                    <select class="form-select" id="randomTokyo">
+                        <option value="1">활성</option>
+                        <option value="0">비활성</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="mb-3">
+                    <label class="form-label">MVP_FIXED_SHINJUKU (고정 위치)</label>
+                    <select class="form-select" id="fixedShinjuku">
+                        <option value="1">활성</option>
+                        <option value="0">비활성</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="mb-3">
+                    <label class="form-label">MVP_FIXED_LAT (고정 위도)</label>
+                    <input type="number" class="form-control" id="fixedLat" value="35.6762" step="any">
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="mb-3">
+                    <label class="form-label">MVP_FIXED_LON (고정 경도)</label>
+                    <input type="number" class="form-control" id="fixedLon" value="139.6503" step="any">
+                </div>
+            </div>
+        </div>
         <button class="btn btn-primary" onclick="saveSettings()">
             <i class="fas fa-save"></i> 설정 저장
         </button>
@@ -377,12 +411,16 @@ function saveSettings() {
         AUTO_REINDEX_ON_CRAWL: document.getElementById('autoReindex').value,
         REINDEX_DEBOUNCE_SEC: document.getElementById('debounceSec').value,
         USE_PLAYWRIGHT_CRAWLING: document.getElementById('playwrightCrawling').value,
-        CRAWL_MAX_LINKS_PER_SITE: document.getElementById('maxLinks').value
+        CRAWL_MAX_LINKS_PER_SITE: document.getElementById('maxLinks').value,
+        MVP_RANDOM_TOKYO: document.getElementById('randomTokyo').value,
+        MVP_FIXED_SHINJUKU: document.getElementById('fixedShinjuku').value,
+        MVP_FIXED_LAT: document.getElementById('fixedLat').value,
+        MVP_FIXED_LON: document.getElementById('fixedLon').value
     };
     
     // 실제로는 API 엔드포인트로 설정 저장
     console.log('설정 저장:', settings);
-    showNotification('설정이 저장되었습니다.', 'success');
+    showNotification('설정이 저장되었습니다. 서버 재시작 후 적용됩니다.', 'success');
 }
 
 // 알림 표시

@@ -15,15 +15,27 @@ import json
 import os
 import sys
 from datetime import datetime
+from functools import lru_cache
+import hashlib
 import logging
 
 # 백엔드 서비스 임포트
 sys.path.append('backend')
-from services_gen import generate_advice
-from services_rag import GLOBAL_RAG
-from services_logging import symptom_logger
-from services_auto_crawler import auto_crawl_unhandled_symptoms
-from services_playwright_crawler import is_playwright_enabled
+try:
+    from services_gen import generate_advice
+    from services_rag import GLOBAL_RAG
+    from services_logging import symptom_logger
+    from services_auto_crawler import auto_crawl_unhandled_symptoms
+    from services_playwright_crawler import is_playwright_enabled
+except ImportError as e:
+    print(f"백엔드 서비스 임포트 오류: {e}")
+    # 기본값 설정
+    GLOBAL_RAG = None
+    symptom_logger = None
+    auto_crawl_unhandled_symptoms = None
+
+# 단순화된 설정
+is_playwright_enabled = lambda: False
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -115,7 +127,19 @@ def get_openai_client():
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     """메인 페이지"""
-    return templates.TemplateResponse("index.html", {"request": {}})
+    # 테스트 모드 설정 확인
+    test_mode = os.getenv('MVP_RANDOM_TOKYO', 'false').lower() == 'true'
+    fixed_shinjuku = os.getenv('MVP_FIXED_SHINJUKU', 'false').lower() == 'true'
+    fixed_lat = os.getenv('MVP_FIXED_LAT', '35.6762')
+    fixed_lon = os.getenv('MVP_FIXED_LON', '139.6503')
+    
+    return templates.TemplateResponse("index.html", {
+        "request": {},
+        "test_mode": test_mode,
+        "fixed_shinjuku": fixed_shinjuku,
+        "fixed_lat": fixed_lat,
+        "fixed_lon": fixed_lon
+    })
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_dashboard():
@@ -160,8 +184,9 @@ async def get_advice(
         
         # LLM 조언 생성
         advice_result = generate_advice(
-            symptom=symptom,
-            rag_passages=rag_passages,
+            symptoms=symptom,
+            findings="",  # 이미지 분석 결과는 별도로 처리
+            passages=rag_passages,
             image_bytes=image_bytes,
             client=client
         )
@@ -176,21 +201,24 @@ async def get_advice(
             symptom_logger.log_symptom(
                 user_input=symptom,
                 advice_content=advice_result['advice'],
-                rag_confidence=rag_confidence,
+                rag_results=hits if GLOBAL_RAG else [],
                 processing_time=processing_time,
                 advice_quality='good' if rag_confidence > 0.7 else 'poor',
                 image_uploaded=bool(image_bytes),
-                lat=lat,
-                lon=lon
+                location=(lat, lon) if lat and lon else None
             )
         except Exception as e:
             logger.error(f"Logging error: {e}")
         
         # 크롤링 트리거 (백그라운드)
         if needs_crawling:
-            asyncio.create_task(trigger_crawling(symptom))
+            try:
+                if auto_crawl_unhandled_symptoms:
+                    auto_crawl_unhandled_symptoms()
+            except Exception as e:
+                logger.error(f"Crawling error: {e}")
         
-        return AdviceResponse(
+        result = AdviceResponse(
             advice=advice_result['advice'],
             otc=advice_result.get('otc', []),
             rag_confidence=rag_confidence,
@@ -198,6 +226,8 @@ async def get_advice(
             is_default_advice=advice_result.get('is_default_advice', False),
             needs_crawling=needs_crawling
         )
+        
+        return result
         
     except Exception as e:
         logger.error(f"Advice generation error: {e}")
@@ -259,7 +289,7 @@ async def get_stats():
             "success_rate": success_rate,
             "confidence_distribution": confidence_ranges,
             "playwright_enabled": is_playwright_enabled(),
-            "rag_passages_count": len(GLOBAL_RAG._all_passages) if GLOBAL_RAG else 0
+            "rag_passages_count": len(GLOBAL_RAG.passages) if GLOBAL_RAG else 0
         }
     except Exception as e:
         logger.error(f"Stats error: {e}")

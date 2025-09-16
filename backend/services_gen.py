@@ -90,8 +90,9 @@ def generate_advice(symptoms: str, findings: str, passages: List, client: Option
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
             ],
-            temperature=0.2,
-            max_tokens=500,
+            temperature=0.1,  # 0.2 -> 0.1로 낮춰서 일관성 향상
+            max_tokens=300,   # 400 -> 300으로 더 줄여서 속도 개선
+            timeout=8,        # 타임아웃을 8초로 단축
         )
         advice = completion.choices[0].message.content or ""
         

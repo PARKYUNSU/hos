@@ -4,6 +4,7 @@ import re
 from rank_bm25 import BM25Okapi
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from functools import lru_cache
 
 
 class HybridRAG:
@@ -135,6 +136,7 @@ class HybridRAG:
         
         return tokens
 
+    @lru_cache(maxsize=1000)
     def _translate_korean_to_japanese(self, query: str) -> str:
         """한국어 쿼리를 일본어로 변환합니다."""
         translated_terms = []
@@ -154,7 +156,7 @@ class HybridRAG:
             return query + " " + " ".join(translated_terms)
         return query
 
-    def search(self, query: str, top_k: int = 5) -> List[Tuple[str, float]]:
+    def search(self, query: str, top_k: int = 2) -> List[Tuple[str, float]]:  # 기본값을 2로 더 줄여서 속도 개선
         if not query:
             return []
         
@@ -214,11 +216,13 @@ def load_rag_data_passages() -> list[str]:
     
     # PDF 파일들 로드
     try:
-        from .services_pdf_processor import load_pdf_passages
+        from backend.services_pdf_processor import load_pdf_passages
         pdf_passages = load_pdf_passages(str(rag_dir))
         passages.extend(pdf_passages)
-    except ImportError:
-        print("PDF 처리 모듈을 찾을 수 없습니다. PDF 파일은 무시됩니다.")
+        print(f"PDF 파일에서 {len(pdf_passages)}개 패시지 로드됨")
+    except ImportError as e:
+        print(f"PDF 처리 모듈을 찾을 수 없습니다: {e}")
+        print("PDF 파일은 무시됩니다.")
     except Exception as e:
         print(f"PDF 파일 처리 중 오류: {e}")
     

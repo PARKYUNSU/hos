@@ -90,9 +90,27 @@
                                             >
                                         </div>
                                     </div>
-                                    <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="getCurrentLocation()">
-                                        <i class="fas fa-location-arrow"></i> 현재 위치 가져오기
-                                    </button>
+                                    <div class="mt-2">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="getCurrentLocation()">
+                                            <i class="fas fa-location-arrow"></i> 현재 위치 가져오기
+                                        </button>
+                                        {% if test_mode %}
+                                        <button type="button" class="btn btn-outline-info btn-sm ms-2" onclick="setRandomTokyoLocation()">
+                                            <i class="fas fa-dice"></i> 랜덤 도쿄 위치
+                                        </button>
+                                        {% endif %}
+                                        {% if fixed_shinjuku %}
+                                        <button type="button" class="btn btn-outline-warning btn-sm ms-2" onclick="setFixedShinjukuLocation()">
+                                            <i class="fas fa-map-pin"></i> 신주쿠 고정 위치
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                    {% if test_mode or fixed_shinjuku %}
+                                    <div class="form-text">
+                                        <i class="fas fa-info-circle text-info"></i> 
+                                        테스트 모드: 랜덤 도쿄 위치 또는 고정 위치를 사용할 수 있습니다.
+                                    </div>
+                                    {% endif %}
                                 </div>
 
                                 <div class="d-grid">

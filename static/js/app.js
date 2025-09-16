@@ -152,3 +152,48 @@ function getCurrentLocation() {
         }
     );
 }
+
+// 랜덤 도쿄 위치 설정 (테스트 모드)
+function setRandomTokyoLocation() {
+    const latInput = document.getElementById('latitude');
+    const lonInput = document.getElementById('longitude');
+    
+    // 도쿄 지역의 랜덤 좌표 생성
+    // 도쿄 중심: 35.6762, 139.6503
+    // ±0.1도 범위 내에서 랜덤 생성 (약 ±11km)
+    const centerLat = 35.6762;
+    const centerLon = 139.6503;
+    const range = 0.1;
+    
+    const randomLat = centerLat + (Math.random() - 0.5) * range;
+    const randomLon = centerLon + (Math.random() - 0.5) * range;
+    
+    latInput.value = randomLat.toFixed(6);
+    lonInput.value = randomLon.toFixed(6);
+    
+    // 시각적 피드백
+    latInput.style.backgroundColor = '#e3f2fd';
+    lonInput.style.backgroundColor = '#e3f2fd';
+    setTimeout(() => {
+        latInput.style.backgroundColor = '';
+        lonInput.style.backgroundColor = '';
+    }, 1000);
+}
+
+// 고정 신주쿠 위치 설정 (테스트 모드)
+function setFixedShinjukuLocation() {
+    const latInput = document.getElementById('latitude');
+    const lonInput = document.getElementById('longitude');
+    
+    // 신주쿠역 근처 고정 좌표
+    latInput.value = '35.6909';
+    lonInput.value = '139.7006';
+    
+    // 시각적 피드백
+    latInput.style.backgroundColor = '#fff3e0';
+    lonInput.style.backgroundColor = '#fff3e0';
+    setTimeout(() => {
+        latInput.style.backgroundColor = '';
+        lonInput.style.backgroundColor = '';
+    }, 1000);
+}
