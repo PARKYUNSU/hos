@@ -18,6 +18,9 @@ from datetime import datetime
 from functools import lru_cache
 import hashlib
 import logging
+import io
+from PIL import Image
+import numpy as np
 
 # 백엔드 서비스 임포트
 sys.path.append('backend')
@@ -87,6 +90,34 @@ class ConnectionManager:
                 self.active_connections.remove(connection)
 
 manager = ConnectionManager()
+
+# 긴급 증상(119 즉시 연락) 선제 판단 함수
+def is_emergency_symptom(text: str) -> bool:
+    t = (text or "").lower()
+    emergency_keywords = [
+        # 호흡/의식
+        "호흡곤란", "숨이", "숨쉬기 어렵", "의식 소실", "의식을 잃", "의식 변화",
+        # 흉통/심혈관
+        "가슴이 아파", "가슴 통증", "흉통", "가슴답답", "심근", "심장마비",
+        # 뇌신경
+        "반신 마비", "마비", "말이 어눌", "구음장애", "한쪽 팔", "한쪽 다리", "뇌졸중", "뇌출혈",
+        # 출혈/외상/화상
+        "대량 출혈", "지속적 출혈", "피가 멈추지", "피가 많이 나", "피가 콸콸",
+        "동맥 출혈", "분수처럼 피", "지혈이 안", "압박해도 피",
+        # 절단/절단상(손가락/발가락 등 포함)
+        "절단", "절단상", "잘렸", "잘라", "끊어졌", "떨어져 나갔",
+        "손가락이 절단", "발가락이 절단", "손가락이 잘렸", "발가락이 잘렸",
+        "절단된 손가락", "절단된 발가락",
+        # 화상 고위험
+        "심한 화상", "광범위 화상",
+        # 알레르기/아나필락시스
+        "아나필락시", "전신 두드러기", "목이 붓", "입술 붓", "호흡이 쌕",
+        # 경련/발작
+        "경련", "발작", "전신 경련",
+        # 영유아 고열 위험
+        "영유아", "아기", "생후", "고열 39", "고열 40",
+    ]
+    return any(k in t for k in emergency_keywords)
 
 # Pydantic 모델들
 class SymptomRequest(BaseModel):
@@ -170,7 +201,53 @@ async def get_advice(
         image_bytes = None
         if image:
             image_bytes = await image.read()
+            # 이미지 기반 응급 차단 로직 (과다 출혈/화상 의심)
+            try:
+                img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+                small = img.resize((224, 224))
+                hsv = small.convert("HSV")
+                arr = np.array(hsv)
+                h = arr[:, :, 0].astype(np.float32)
+                s = arr[:, :, 1].astype(np.float32)
+                v = arr[:, :, 2].astype(np.float32)
+                red_thr = float(os.getenv("IMG_RED_RATIO", "0.25"))
+                burn_thr = float(os.getenv("IMG_BURN_RATIO", "0.30"))
+                red_mask = ((h < 10) | (h > 245)) & (s > 100) & (v > 60)
+                red_ratio = float(red_mask.mean())
+                orange_mask = (h >= 10) & (h <= 50) & (s > 120) & (v > 120)
+                orange_ratio = float(orange_mask.mean())
+                if red_ratio > red_thr or orange_ratio > burn_thr:
+                    advice_text = (
+                        "이미지에서 응급 위험(과다 출혈/심한 화상)이 의심됩니다. \n"
+                        "지금 즉시 119(일본)로 연락하시고, 가능한 경우 주변의 도움을 요청하세요."
+                    )
+                    return AdviceResponse(
+                        advice=advice_text,
+                        otc=[],
+                        rag_confidence=0.0,
+                        processing_time=(datetime.now() - start_time).total_seconds(),
+                        is_default_advice=True,
+                        needs_crawling=False,
+                    )
+            except Exception:
+                pass
         
+        # 119 즉시 연락 판단(선제)
+        if is_emergency_symptom(symptom):
+            advice_text = (
+                "현재 증상은 응급 위험 소견에 해당할 수 있습니다. \n"
+                "지금 즉시 119(일본)로 연락하시고, 가능한 경우 주변의 도움을 요청하세요. \n"
+                "의식 변화·호흡곤란·갑작스런 흉통·반신마비·지속적 출혈·광범위 화상·아나필락시스 등이 의심되면 지체하지 마세요."
+            )
+            return AdviceResponse(
+                advice=advice_text,
+                otc=[],
+                rag_confidence=0.0,
+                processing_time=(datetime.now() - start_time).total_seconds(),
+                is_default_advice=True,
+                needs_crawling=False,
+            )
+
         # RAG 검색
         rag_passages = []
         rag_confidence = 0.0
