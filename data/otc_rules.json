@@ -1,8 +1,8 @@
 {
-  "version": 1,
+  "version": 2,
   "meta": {
     "source": ["PMDA", "RAD-AR"],
-    "notes": "간단한 데모 규칙 세트. 운영 시 주기적 업데이트 권장."
+    "notes": "데모 규칙 + 확장 클래스/제품/조건부 금기. 운영 시 주기적 업데이트 권장."
   },
   "classes": {
     "analgesic_acetaminophen": {
@@ -16,8 +16,13 @@
       "max_per_recommendation": 1
     },
     "antihistamine": {
-      "aliases": ["항히스타민", "抗ヒスタミン", "フェキソフェナジン", "セチリジン", "クロルフェニラミン"],
+      "aliases": ["항히스타민", "抗ヒスタミン", "フェキソフェナジン", "セチリジン", "クロルフェニラミン", "클로르페니라민"],
       "mutually_exclusive_with": [],
+      "max_per_recommendation": 1
+    },
+    "antihistamine_sedating": {
+      "aliases": ["클로르페니라민", "クロルフェニラミン"],
+      "mutually_exclusive_with": ["antihistamine"],
       "max_per_recommendation": 1
     },
     "antacid": {
@@ -26,7 +31,22 @@
       "max_per_recommendation": 1
     },
     "cough": {
-      "aliases": ["기침약", "진해제", "鎮咳", "去痰", "デキストロメトルファン", "dextromethorphan"],
+      "aliases": ["기침약", "진해제", "鎮咳", "去痰", "デキストロメトルファン", "dextromethorphan", "덱스트로메토르판"],
+      "mutually_exclusive_with": [],
+      "max_per_recommendation": 1
+    },
+    "decongestant": {
+      "aliases": ["코막힘", "충혈 완화", "pseudoephedrine", "페닐에프린", "プソイドエフェドリン", "フェニレフリン"],
+      "mutually_exclusive_with": [],
+      "max_per_recommendation": 1
+    },
+    "expectorant": {
+      "aliases": ["거담제", "구아이페네신", "guaifenesin", "グアイフェネシン"],
+      "mutually_exclusive_with": [],
+      "max_per_recommendation": 1
+    },
+    "salicylate": {
+      "aliases": ["아스피린", "아세틸살리실산", "aspirin", "サリチル酸"],
       "mutually_exclusive_with": [],
       "max_per_recommendation": 1
     },
@@ -51,7 +71,12 @@
     {"brand": "タイレノールA", "class": "analgesic_acetaminophen", "ingredient": "acetaminophen", "dose": "300mg"},
     {"brand": "ガスター10", "class": "antacid", "ingredient": "famotidine", "dose": "10mg"},
     {"brand": "アレグラFX", "class": "antihistamine", "ingredient": "fexofenadine", "dose": "60mg"},
-    {"brand": "ストッパ", "class": "antidiarrheal", "ingredient": "loperamide", "dose": "2mg"}
+    {"brand": "ストッパ", "class": "antidiarrheal", "ingredient": "loperamide", "dose": "2mg"},
+    {"brand": "パブロンSゴールドW", "class": "cough", "ingredient": "dextromethorphan", "dose": "20mg"},
+    {"brand": "ベンザブロックS", "class": "decongestant", "ingredient": "phenylephrine", "dose": "10mg"},
+    {"brand": "コンタック600プラス", "class": "decongestant", "ingredient": "pseudoephedrine", "dose": "120mg"},
+    {"brand": "新ルルAゴールドDX", "class": "antihistamine_sedating", "ingredient": "chlorpheniramine", "dose": "2mg"},
+    {"brand": "ムコダイン錠", "class": "expectorant", "ingredient": "guaifenesin", "dose": "200mg"}
   ],
   "constraints": {
     "max_per_class": 1,
@@ -59,7 +84,14 @@
       ["analgesic_acetaminophen", "analgesic_nsaid"]
     ],
     "avoid_pairs": [
-      ["caffeine", "cough"]
+      ["caffeine", "cough"],
+      ["decongestant", "maoi"],
+      ["antihistamine_sedating", "alcohol"]
+    ],
+    "conditional": [
+      { "max_age": 12, "forbid_classes": ["antidiarrheal", "salicylate"], "message": "12세 미만 지사제/살리실레이트 금지" },
+      { "pregnant": true, "forbid_classes": ["analgesic_nsaid", "decongestant"], "message": "임신 중 NSAID/충혈완화제 금지(특히 3분기)" },
+      { "symptom_keywords": ["천식", "asthma"], "forbid_classes": ["analgesic_nsaid"], "message": "천식 환자 NSAID 주의" }
     ]
   }
 }

@@ -126,7 +126,8 @@ def generate_advice(symptoms: str, findings: str, passages: List, client: Option
                 from backend.otc_rules import normalize_otc_list
                 with rules_path.open("r", encoding="utf-8") as f:
                     rules = json.load(f)
-                otc = normalize_otc_list(otc, rules)
+                # 연령/임신 여부/증상 텍스트 기반 조건 반영 (추후 API에서 전달되면 값 사용)
+                otc = normalize_otc_list(otc, rules, age=None, pregnant=False, symptom_text=symptoms or "")
         except Exception:
             pass
         

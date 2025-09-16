@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 RULES_PATH = Path(__file__).resolve().parent.parent / "data/otc_rules.json"
 
@@ -18,7 +18,7 @@ def save_rules(rules: Dict) -> None:
         json.dump(rules, f, ensure_ascii=False, indent=2)
 
 
-def normalize_otc_list(otc_list: List[str], rules: Dict) -> List[str]:
+def normalize_otc_list(otc_list: List[str], rules: Dict, *, age: Optional[int] = None, pregnant: Optional[bool] = None, symptom_text: str = "") -> List[str]:
     """Apply max_per_class, mutual exclusions, and avoid_pairs based on rules.
     Input otc_list is list of human-readable labels.
     """
@@ -56,17 +56,40 @@ def normalize_otc_list(otc_list: List[str], rules: Dict) -> List[str]:
 
     # avoid_pairs filtering (soft rule)
     avoid = set(tuple(sorted(x)) for x in constraints.get("avoid_pairs", []))
-    final: List[str] = []
+    filtered: List[Tuple[str, str]] = []
     for label, cls in chosen:
-        bad = False
+        skip = False
         for label2, cls2 in chosen:
             if label == label2:
                 continue
             if tuple(sorted((cls, cls2))) in avoid:
-                bad = True
+                skip = True
                 break
-        if not bad:
-            final.append(label)
-    return final
+        if not skip:
+            filtered.append((label, cls))
+
+    # conditional constraints
+    cond = rules.get("constraints", {}).get("conditional", [])
+    symptom_low = symptom_text.lower() if symptom_text else ""
+    out: List[str] = []
+    for label, cls in filtered:
+        forbidden = False
+        for c in cond:
+            if c.get("max_age") is not None and age is not None and age <= int(c["max_age"]):
+                if cls in c.get("forbid_classes", []):
+                    forbidden = True
+                    break
+            if c.get("pregnant") and pregnant:
+                if cls in c.get("forbid_classes", []):
+                    forbidden = True
+                    break
+            kws = c.get("symptom_keywords", [])
+            if kws and any(k.lower() in symptom_low for k in kws):
+                if cls in c.get("forbid_classes", []):
+                    forbidden = True
+                    break
+        if not forbidden:
+            out.append(label)
+    return out
 
 

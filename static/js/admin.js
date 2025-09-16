@@ -341,7 +341,52 @@ async function loadSettings() {
         <button class="btn btn-primary" onclick="saveSettings()">
             <i class="fas fa-save"></i> 설정 저장
         </button>
+        <hr/>
+        <div class="row mt-3">
+            <div class="col-md-6">
+                <h5>OTC 병용 금기 규칙</h5>
+                <div class="mb-2">
+                    <button class="btn btn-sm btn-secondary" onclick="loadOtcRules()">불러오기</button>
+                    <button class="btn btn-sm btn-primary" onclick="saveOtcRules()">저장</button>
+                    <button class="btn btn-sm btn-outline-dark" onclick="backupOtcRules()">백업</button>
+                    <input type="file" id="restoreFile" accept="application/json" class="form-control form-control-sm mt-2" onchange="restoreOtcRules(event)">
+                </div>
+                <textarea id="otcRulesEditor" class="form-control" rows="14" placeholder="JSON 규칙"></textarea>
+                <small class="text-muted">PMDA/RAD-AR 기준을 반영한 규칙 JSON을 직접 수정/백업/복구할 수 있습니다.</small>
+            </div>
+        </div>
     `;
+}
+// 규칙 백업/복구
+function backupOtcRules() {
+  try {
+    const el = document.getElementById('otcRulesEditor');
+    if (!el) return;
+    const blob = new Blob([el.value], {type: 'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `otc_rules_backup_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+    a.click();
+  } catch (e) {
+    showNotification('백업 실패: ' + e, 'error');
+  }
+}
+
+function restoreOtcRules(evt) {
+  const file = evt.target.files && evt.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function() {
+    try {
+      const text = reader.result;
+      JSON.parse(text); // 유효성 확인
+      document.getElementById('otcRulesEditor').value = text;
+      showNotification('파일 로드 완료. 저장 버튼으로 적용하세요.', 'success');
+    } catch (e) {
+      showNotification('복구 파일 파싱 실패: ' + e, 'error');
+    }
+  };
+  reader.readAsText(file, 'utf-8');
 }
 
 // 신뢰도 배지 클래스 반환
