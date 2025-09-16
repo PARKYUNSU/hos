@@ -83,6 +83,18 @@ document.addEventListener('DOMContentLoaded', function() {
             otcSection.style.display = 'none';
         }
         
+        // 참고 문헌 표시
+        const refs = data.references || [];
+        const refBox = document.getElementById('referencesBox');
+        if (refBox) {
+            if (refs.length) {
+                refBox.style.display = 'block';
+                document.getElementById('referencesList').innerHTML = refs.map(r => `<li>${r}</li>`).join('');
+            } else {
+                refBox.style.display = 'none';
+            }
+        }
+
         // 통계 정보 표시
         document.getElementById('ragConfidence').textContent = 
             `${(data.rag_confidence * 100).toFixed(1)}%`;
@@ -105,6 +117,17 @@ document.addEventListener('DOMContentLoaded', function() {
             confidenceElement.className = 'text-warning fw-bold';
         } else {
             confidenceElement.className = 'text-danger fw-bold';
+        }
+
+        // 주변 병원/약국 표시
+        const hospBox = document.getElementById('nearbyHospitals');
+        const pharmBox = document.getElementById('nearbyPharmacies');
+        if (hospBox && pharmBox) {
+            const hospitals = data.nearby_hospitals || [];
+            const pharmacies = data.nearby_pharmacies || [];
+            hospBox.innerHTML = hospitals.length ? hospitals.map(h => `<li>${h.name} (${h.lat.toFixed(5)}, ${h.lon.toFixed(5)})</li>`).join('') : '<li>검색 결과 없음</li>';
+            pharmBox.innerHTML = pharmacies.length ? pharmacies.map(p => `<li>${p.name} (${p.lat.toFixed(5)}, ${p.lon.toFixed(5)})</li>`).join('') : '<li>검색 결과 없음</li>';
+            document.getElementById('poiSection').style.display = (hospitals.length || pharmacies.length) ? 'block' : 'none';
         }
     }
     

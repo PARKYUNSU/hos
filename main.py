@@ -10,6 +10,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
+import requests
+import requests
 import asyncio
 import json
 import os
@@ -38,8 +40,7 @@ except ImportError as e:
     symptom_logger = None
     auto_crawl_unhandled_symptoms = None
 
-# 단순화된 설정
-is_playwright_enabled = lambda: False
+# 단순화된 설정 (임포트 성공 시 실제 함수 사용)
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -154,6 +155,9 @@ class AdviceResponse(BaseModel):
     processing_time: float
     is_default_advice: bool
     needs_crawling: bool
+    references: List[str] = []
+    nearby_hospitals: List[Dict[str, Any]] = []
+    nearby_pharmacies: List[Dict[str, Any]] = []
 
 class LogEntry(BaseModel):
     id: int
@@ -303,6 +307,50 @@ async def get_advice(
         
         # 크롤링 필요성 판단
         needs_crawling = rag_confidence < 0.7
+
+        # 참고문헌 스니펫 구성
+        references: List[str] = []
+        for p in rag_passages[:3]:
+            snippet = (p or "").strip().replace("\n", " ")
+            if snippet:
+                references.append(snippet[:180] + ("..." if len(snippet) > 180 else ""))
+
+        # 주변 병원/약국 검색 (위치가 제공된 경우)
+        nearby_hospitals: List[Dict[str, Any]] = []
+        nearby_pharmacies: List[Dict[str, Any]] = []
+        try:
+            if lat and lon:
+                # Overpass API로 간단 검색
+                def search_pois(amenity: str) -> List[Dict[str, Any]]:
+                    query = f"""
+                    [out:json][timeout:10];
+                    (
+                      node["amenity"="{amenity}"](around:2000,{lat},{lon});
+                      way["amenity"="{amenity}"](around:2000,{lat},{lon});
+                      relation["amenity"="{amenity}"](around:2000,{lat},{lon});
+                    );
+                    out center 15;
+                    """
+                    r = requests.post("https://overpass-api.de/api/interpreter", data={"data": query}, timeout=10)
+                    r.raise_for_status()
+                    js = r.json()
+                    res: List[Dict[str, Any]] = []
+                    for el in js.get("elements", [])[:10]:
+                        tags = el.get("tags", {}) or {}
+                        name = tags.get("name") or amenity
+                        if el.get("type") == "node":
+                            clat, clon = el.get("lat"), el.get("lon")
+                        else:
+                            center = el.get("center") or {}
+                            clat, clon = center.get("lat"), center.get("lon")
+                        if clat is None or clon is None:
+                            continue
+                        res.append({"name": name, "lat": clat, "lon": clon})
+                    return res
+                nearby_hospitals = search_pois("hospital")
+                nearby_pharmacies = search_pois("pharmacy")
+        except Exception as e:
+            logger.error(f"POI search error: {e}")
         
         # 로그 저장
         try:
@@ -332,7 +380,10 @@ async def get_advice(
             rag_confidence=rag_confidence,
             processing_time=processing_time,
             is_default_advice=advice_result.get('is_default_advice', False),
-            needs_crawling=needs_crawling
+            needs_crawling=needs_crawling,
+            references=references,
+            nearby_hospitals=nearby_hospitals,
+            nearby_pharmacies=nearby_pharmacies
         )
         
         return result
