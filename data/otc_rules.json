@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "meta": {
+    "source": ["PMDA", "RAD-AR"],
+    "notes": "간단한 데모 규칙 세트. 운영 시 주기적 업데이트 권장."
+  },
+  "classes": {
+    "analgesic_acetaminophen": {
+      "aliases": ["아세트아미노펜", "acetaminophen", "타이레놀", "アセトアミノフェン"],
+      "mutually_exclusive_with": ["analgesic_nsaid"],
+      "max_per_recommendation": 1
+    },
+    "analgesic_nsaid": {
+      "aliases": ["이부프로펜", "ibuprofen", "ロキソプロフェン", "ロキソニン", "バファリン", "NSAID"],
+      "mutually_exclusive_with": ["analgesic_acetaminophen"],
+      "max_per_recommendation": 1
+    },
+    "antihistamine": {
+      "aliases": ["항히스타민", "抗ヒスタミン", "フェキソフェナジン", "セチリジン", "クロルフェニラミン"],
+      "mutually_exclusive_with": [],
+      "max_per_recommendation": 1
+    },
+    "antacid": {
+      "aliases": ["제산제", "胃薬", "ファモチジン", "ガスター"],
+      "mutually_exclusive_with": [],
+      "max_per_recommendation": 1
+    },
+    "cough": {
+      "aliases": ["기침약", "진해제", "鎮咳", "去痰", "デキストロメトルファン", "dextromethorphan"],
+      "mutually_exclusive_with": [],
+      "max_per_recommendation": 1
+    },
+    "antidiarrheal": {
+      "aliases": ["지사제", "ロペラミド", "loperamide"],
+      "mutually_exclusive_with": [],
+      "max_per_recommendation": 1
+    },
+    "topical_steroid": {
+      "aliases": ["스테로이드 외용", "ヒドロコルチゾン"],
+      "mutually_exclusive_with": [],
+      "max_per_recommendation": 1
+    },
+    "caffeine": {
+      "aliases": ["카페인", "caffeine"],
+      "mutually_exclusive_with": ["cough"],
+      "notes": "카페인과 진해제 병용 주의(불면/심계항진)"
+    }
+  },
+  "products": [
+    {"brand": "ロキソニンS", "class": "analgesic_nsaid", "ingredient": "loxoprofen", "dose": "60mg"},
+    {"brand": "タイレノールA", "class": "analgesic_acetaminophen", "ingredient": "acetaminophen", "dose": "300mg"},
+    {"brand": "ガスター10", "class": "antacid", "ingredient": "famotidine", "dose": "10mg"},
+    {"brand": "アレグラFX", "class": "antihistamine", "ingredient": "fexofenadine", "dose": "60mg"},
+    {"brand": "ストッパ", "class": "antidiarrheal", "ingredient": "loperamide", "dose": "2mg"}
+  ],
+  "constraints": {
+    "max_per_class": 1,
+    "mutual_exclusions": [
+      ["analgesic_acetaminophen", "analgesic_nsaid"]
+    ],
+    "avoid_pairs": [
+      ["caffeine", "cough"]
+    ]
+  }
+}

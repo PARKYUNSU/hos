@@ -1,5 +1,7 @@
 import os
 from typing import List, Optional
+from pathlib import Path
+import json
 import base64
 from openai import OpenAI
 import streamlit as st
@@ -30,7 +32,8 @@ SYSTEM_PROMPT = (
     "4. **실용적 조언**: 일본 약국에서 구매 가능한 OTC 약품(제품명 포함) 추천\n"
     "5. **한국어 출력**: 모든 조언을 한국어로 제공\n"
     "6. **금기사항 명시**: 영유아, 임산부, 기저질환자 주의사항 포함\n"
-    "7. **RAG 문서 활용**: 제공된 일본 의료 문서를 참고하여 정확한 조언 제공\n\n"
+    "7. **병용 금기 준수**: 중복·병용 금기 성분은 함께 추천하지 말 것 (예: 아세트아미노펜 vs NSAID 중복 금지)\n"
+    "8. **RAG 문서 활용**: 제공된 일본 의료 문서를 참고하여 정확한 조언 제공\n\n"
     "증상이 여러 개인 경우, **증상별 섹션**으로 구조화하세요. 각 증상 섹션은 아래 형식을 따릅니다:\n"
     "- 증상명\n"
     "  1) 응급처치\n"
@@ -115,6 +118,53 @@ def generate_advice(symptoms: str, findings: str, passages: List, client: Option
             if re.search(pattern, advice, flags=re.IGNORECASE):
                 if label not in otc:
                     otc.append(label)
+        
+        # 외부 규칙 파일 기반 고급 필터 (data/otc_rules.json)
+        try:
+            rules_path = Path(__file__).resolve().parent.parent / "data/otc_rules.json"
+            if rules_path.exists():
+                from backend.otc_rules import normalize_otc_list
+                with rules_path.open("r", encoding="utf-8") as f:
+                    rules = json.load(f)
+                otc = normalize_otc_list(otc, rules)
+        except Exception:
+            pass
+        
+        # OTC 병용 금기/중복 최소화 필터
+        def classify(label: str) -> str:
+            ll = label.lower()
+            if "아세트아미노펜" in ll or "acetaminophen" in ll or "타이레놀" in ll:
+                return "analgesic_acetaminophen"
+            if "이부프로펜" in ll or "로키소" in ll or "진통·소염" in ll:
+                return "analgesic_nsaid"
+            if "항히스타민" in ll:
+                return "antihistamine"
+            if "제산" in ll or "소화제" in ll or "胃薬" in ll:
+                return "antacid"
+            if "기침" in ll or "거담" in ll:
+                return "cough"
+            if "지사제" in ll or "loperamide" in ll or "ロペラミド" in ll:
+                return "antidiarrheal"
+            if "스테로이드 외용" in ll or "ヒドロコルチゾン" in ll:
+                return "topical_steroid"
+            return "other"
+
+        sanitized: list[str] = []
+        analgesic_taken = False
+        taken_classes = set()
+        for item in otc:
+            cls = classify(item)
+            if cls in ("analgesic_acetaminophen", "analgesic_nsaid"):
+                if analgesic_taken:
+                    continue
+                analgesic_taken = True
+                sanitized.append(item)
+                continue
+            if cls in taken_classes:
+                continue
+            taken_classes.add(cls)
+            sanitized.append(item)
+        otc = sanitized
             
         return {
             'advice': advice,

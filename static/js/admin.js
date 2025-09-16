@@ -92,6 +92,35 @@ function showTab(tabName) {
     }
 }
 
+// OTC 규칙 편집기
+async function loadOtcRules() {
+    try {
+        const res = await fetch('/api/otc_rules');
+        const data = await res.json();
+        const el = document.getElementById('otcRulesEditor');
+        if (el) el.value = JSON.stringify(data, null, 2);
+    } catch (e) {
+        showNotification('규칙 불러오기 실패: ' + e, 'error');
+    }
+}
+
+async function saveOtcRules() {
+    try {
+        const el = document.getElementById('otcRulesEditor');
+        if (!el) return;
+        const json = JSON.parse(el.value);
+        const res = await fetch('/api/otc_rules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rules: json })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        showNotification('규칙 저장 완료', 'success');
+    } catch (e) {
+        showNotification('규칙 저장 실패: ' + e, 'error');
+    }
+}
+
 // 대시보드 데이터 로드
 async function loadDashboard() {
     try {

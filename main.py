@@ -30,6 +30,7 @@ try:
     from services_logging import symptom_logger
     from services_auto_crawler import auto_crawl_unhandled_symptoms
     from services_playwright_crawler import is_playwright_enabled
+    from otc_rules import load_rules, save_rules
 except ImportError as e:
     print(f"백엔드 서비스 임포트 오류: {e}")
     # 기본값 설정
@@ -400,6 +401,27 @@ async def get_stats():
         }
     except Exception as e:
         logger.error(f"Stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/otc_rules")
+async def get_otc_rules():
+    try:
+        return load_rules()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RulesUpdate(BaseModel):
+    rules: Dict[str, Any]
+
+
+@app.post("/api/otc_rules")
+async def update_otc_rules(payload: RulesUpdate):
+    try:
+        save_rules(payload.rules)
+        return {"ok": True}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/ws/logs")
