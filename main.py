@@ -119,6 +119,28 @@ def is_emergency_symptom(text: str) -> bool:
     ]
     return any(k in t for k in emergency_keywords)
 
+# 다중 증상 분리 유틸
+def split_symptoms(text: str) -> List[str]:
+    if not text:
+        return []
+    candidates = []
+    tmp = text
+    # 구분자 기준 분리 (쉼표/마침표/연결어)
+    for sep in ["\n", ",", "·", "∙", "/", " 그리고 ", " 및 ", " 와 함께 ", " 하고 ", ".", ";", "、"]:
+        tmp = tmp.replace(sep, "|")
+    for part in tmp.split("|"):
+        s = part.strip()
+        if len(s) >= 2:
+            candidates.append(s)
+    # 중복 제거, 상위 3개까지만 사용
+    seen = set()
+    unique = []
+    for s in candidates:
+        if s not in seen:
+            seen.add(s)
+            unique.append(s)
+    return unique[:3]
+
 # Pydantic 모델들
 class SymptomRequest(BaseModel):
     symptom: str
@@ -232,8 +254,9 @@ async def get_advice(
             except Exception:
                 pass
         
-        # 119 즉시 연락 판단(선제)
-        if is_emergency_symptom(symptom):
+        # 다중 증상 분리 및 119 즉시 연락 판단(선제)
+        symptom_list = split_symptoms(symptom)
+        if any(is_emergency_symptom(s) for s in ([symptom] + symptom_list)):
             advice_text = (
                 "현재 증상은 응급 위험 소견에 해당할 수 있습니다. \n"
                 "지금 즉시 119(일본)로 연락하시고, 가능한 경우 주변의 도움을 요청하세요. \n"
@@ -248,18 +271,25 @@ async def get_advice(
                 needs_crawling=False,
             )
 
-        # RAG 검색
+        # RAG 검색(다중 증상 late merge)
         rag_passages = []
         rag_confidence = 0.0
+        merged_hits = []
         if GLOBAL_RAG:
             try:
-                hits = GLOBAL_RAG.search(symptom, top_k=3)
-                rag_passages = [passage for passage, _ in hits]
-                rag_confidence = max([score for _, score in hits]) if hits else 0.0
+                queries = symptom_list or [symptom]
+                for q in queries:
+                    hits = GLOBAL_RAG.search(q, top_k=3)
+                    merged_hits.extend(hits)
+                # 상위 근거 추출
+                merged_hits = sorted(merged_hits, key=lambda x: x[1], reverse=True)[:3]
+                rag_passages = [p for p, _ in merged_hits]
+                rag_confidence = max([s for _, s in merged_hits]) if merged_hits else 0.0
             except Exception as e:
                 logger.error(f"RAG search error: {e}")
         
         # LLM 조언 생성
+        # LLM에는 원문 전체 증상 문자열 전달(종합 조언)
         advice_result = generate_advice(
             symptoms=symptom,
             findings="",  # 이미지 분석 결과는 별도로 처리
