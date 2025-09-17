@@ -135,6 +135,7 @@ async function loadDashboard() {
         
         // 차트 업데이트
         updateConfidenceChart(stats.confidence_distribution);
+        updateTimeSeriesChart();
         
         // 실시간 로그 로드
         loadRealtimeLogs();
@@ -442,21 +443,40 @@ function updateConfidenceChart(distribution) {
 }
 
 // 시간별 차트 업데이트
-function updateTimeChart() {
+async function updateTimeSeriesChart() {
     const ctx = document.getElementById('timeChart').getContext('2d');
     
     if (timeChart) {
         timeChart.destroy();
     }
-    
-    // 임시 데이터 (실제로는 API에서 가져와야 함)
-    timeChart = new Chart(ctx, {
+    try {
+      const res = await fetch('/api/logs?limit=500');
+      const logs = await res.json();
+      // 최근 24시간을 시:00 단위로 그룹핑
+      const buckets = new Map();
+      const now = new Date();
+      for (let i=0;i<24;i++) {
+        const d = new Date(now.getTime()-i*3600000);
+        d.setMinutes(0,0,0);
+        buckets.set(d.toISOString().slice(11,16), 0);
+      }
+      logs.forEach(l => {
+        const t = new Date(l.timestamp);
+        if (isNaN(t.getTime())) return;
+        const h = new Date(t.getTime());
+        h.setMinutes(0,0,0);
+        const key = h.toISOString().slice(11,16); // HH:00
+        if (buckets.has(key)) buckets.set(key, (buckets.get(key)||0)+1);
+      });
+      const labels = Array.from(buckets.keys()).reverse();
+      const data = labels.map(k => buckets.get(k));
+      timeChart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'],
+            labels,
             datasets: [{
                 label: '로그 수',
-                data: [2, 1, 5, 8, 6, 4],
+                data,
                 borderColor: '#0d6efd',
                 backgroundColor: 'rgba(13, 110, 253, 0.1)',
                 tension: 0.4
@@ -470,7 +490,10 @@ function updateTimeChart() {
                 }
             }
         }
-    });
+      });
+    } catch (e) {
+      console.error('시간별 차트 생성 오류:', e);
+    }
 }
 
 // 조언 내용 표시

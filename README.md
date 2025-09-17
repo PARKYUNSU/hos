@@ -25,44 +25,49 @@
 - **자동 크롤링**: 일본 의료 사이트에서 데이터 수집
 - **RAG 업데이트**: 새로운 데이터 자동 통합
 
-## 🚀 설치 및 실행
+## 🚀 설치 및 실행 (FastAPI)
 
-### 1. 저장소 클론
+### 1) 저장소 클론
 ```bash
 git clone https://github.com/PARKYUNSU/hos.git
 cd hos
 ```
 
-### 2. 의존성 설치
+### 2) 의존성 설치
 ```bash
 pip install -r requirements.txt
+# (옵션) Playwright 브라우저 설치
+python -m playwright install chromium --with-deps
 ```
 
-### 3. 환경변수 설정
-`.env` 파일 생성:
+### 3) 환경변수 설정 (.env)
 ```env
-AI_API_KEY=your_ai_api_key_here
-IMG_RED_RATIO=0.3
-IMG_BURN_RATIO=0.2
-TRIAGE_API_URL=https://your-triage-api-url.com
-MVP_RANDOM_TOKYO=true
+OPENAI_API_KEY=sk-...
+USE_PLAYWRIGHT_CRAWLING=1
+PW_HEADLESS=1
+PW_WAIT_UNTIL=networkidle
+# 응급 이미지 탐지 임계값
+IMG_RED_RATIO=0.25
+IMG_BURN_RATIO=0.30
+# 테스트 모드(위치)
+MVP_RANDOM_TOKYO=false
 MVP_FIXED_SHINJUKU=false
 MVP_FIXED_LAT=35.6762
 MVP_FIXED_LON=139.6503
-FAST_MODE=false
+# RAG 자동 재색인
+AUTO_REINDEX_ON_CRAWL=0
+REINDEX_DEBOUNCE_SEC=120
 ```
 
-### 4. 앱 실행
+### 4) 앱 실행
 ```bash
-# 메인 챗봇 앱
-streamlit run ui/app.py
-
-# 관리자 대시보드
-python run_admin.py
-
-# 자동 크롤링 스케줄러
-python scheduler.py
+uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
+
+### 5) 확인
+- 메인: http://127.0.0.1:8000/
+- 관리자: http://127.0.0.1:8000/admin
+- 헬스: http://127.0.0.1:8000/api/health
 
 ## 📊 관리자 대시보드
 
@@ -90,45 +95,68 @@ python scheduler.py
 - **JMA (日本医師会)**: 일본 의사회 응급처치 가이드
 - **JRC (日本赤十字社)**: 일본 적십자사 응급처치 매뉴얼
 
-## 📁 프로젝트 구조
+## 📁 프로젝트 구조 (요약)
 
 ```
 hos/
-├── ui/
-│   └── app.py                 # 메인 챗봇 앱
 ├── backend/
-│   ├── services_logging.py    # 증상 로깅 시스템
-│   ├── services_auto_crawler.py # 자동 크롤링
-│   ├── services_rag_updater.py # RAG 업데이트
-│   └── services_rag.py        # RAG 시스템
+│   ├── services_gen.py
+│   ├── services_rag.py
+│   ├── services_logging.py
+│   ├── services_auto_crawler.py
+│   ├── services_playwright_crawler.py
+│   ├── services_pdf_processor.py
+│   └── otc_rules.py
 ├── data/
-│   ├── passages/jp/           # 일본 의료 데이터
-│   └── symptom_logs.db        # 증상 로그 데이터베이스
-├── admin_dashboard.py         # 관리자 대시보드
-├── scheduler.py               # 자동화 스케줄러
-├── run_admin.py              # 관리자 앱 실행 스크립트
-└── requirements.txt           # 의존성 목록
+│   ├── rag_data/               # RAG 문서(PDF/TXT)
+│   └── symptom_logs.db         # SQLite 로그
+├── static/
+│   ├── js/app.js
+│   ├── js/admin.js
+│   └── css/*
+├── templates/
+│   ├── index.html              # 메인 UI
+│   └── admin.html              # 관리자 UI
+├── main.py                     # FastAPI 앱
+├── docker-compose.yml
+├── Dockerfile
+├── requirements.txt
+└── README.md
 ```
 
 ## 🌐 배포
 
-### Streamlit Cloud
-1. GitHub 저장소 연결
-2. 환경변수 설정 (Secrets)
-3. 자동 배포
+### Docker Compose (권장)
+```bash
+# 서버에서
+docker compose build
+docker compose up -d
+curl -sS http://127.0.0.1:8000/api/health
+```
 
-### 환경변수 설정 (Streamlit Cloud)
-```toml
-[secrets]
-AI_API_KEY = "your-ai-api-key-here"
-IMG_RED_RATIO = "0.3"
-IMG_BURN_RATIO = "0.2"
-TRIAGE_API_URL = "https://your-triage-api-url.com"
-MVP_RANDOM_TOKYO = "true"
-MVP_FIXED_SHINJUKU = "false"
-MVP_FIXED_LAT = "35.6762"
-MVP_FIXED_LON = "139.6503"
-FAST_MODE = "false"
+### Nginx 리버스 프록시 (예시)
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 300;
+    }
+
+    location /admin {
+        auth_basic "Restricted";
+        auth_basic_user_file /etc/nginx/.htpasswd_admin;
+        proxy_pass http://127.0.0.1:8000/admin;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
 ```
 
 ## 🔧 개발

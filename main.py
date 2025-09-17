@@ -17,6 +17,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from dotenv import load_dotenv
 from functools import lru_cache
 import hashlib
 import logging
@@ -45,6 +46,12 @@ except ImportError as e:
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# 환경변수 로드 (.env)
+try:
+    load_dotenv()
+except Exception:
+    pass
 
 # FastAPI 앱 초기화
 app = FastAPI(
@@ -466,6 +473,11 @@ async def get_stats():
         for log in logs:
             try:
                 confidence = float(log['rag_confidence']) if log['rag_confidence'] else 0.0
+                # 0..1 범위로 클램프
+                if confidence < 0.0:
+                    confidence = 0.0
+                elif confidence > 1.0:
+                    confidence = 1.0
                 if 0.0 <= confidence < 0.2:
                     confidence_ranges['0-0.2'] += 1
                 elif 0.2 <= confidence < 0.4:
@@ -552,7 +564,10 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "rag_loaded": GLOBAL_RAG is not None,
-        "playwright_enabled": is_playwright_enabled()
+        "playwright_enabled": is_playwright_enabled(),
+        "use_playwright_env": os.getenv("USE_PLAYWRIGHT_CRAWLING"),
+        "pw_headless": os.getenv("PW_HEADLESS"),
+        "pw_wait_until": os.getenv("PW_WAIT_UNTIL")
     }
 
 if __name__ == "__main__":
