@@ -126,10 +126,21 @@ document.addEventListener('DOMContentLoaded', function() {
             const hospitals = (data.nearby_hospitals || []).slice(0,5);
             const pharmacies = (data.nearby_pharmacies || []).slice(0,5);
             const toItem = (x) => {
-                const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(x.name)}&query=${encodeURIComponent((x.lat||'') + ',' + (x.lon||''))}`;
+                const hasCoord = x.lat != null && x.lon != null;
+                const coord = hasCoord ? `${x.lat},${x.lon}` : '';
+                // 좌표 기반 검색으로 전국 검색 확장 방지
+                const mapUrl = hasCoord
+                  ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coord)}`
+                  : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(x.name)}`;
+                const dirUrl = hasCoord
+                  ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(coord)}`
+                  : null;
                 return `<li class="mb-1 d-flex justify-content-between align-items-center">
-                    <span>${x.name}${x.distance!=null?` <small class="text-muted">(${x.distance.toFixed(1)}km)</small>`:''}</span>
-                    <a class="btn btn-sm btn-outline-primary" href="${url}" target="_blank"><i class="fas fa-map"></i> 지도</a>
+                    <span>${x.name}${x.distance!=null?` <small class=\"text-muted\">(${x.distance.toFixed(1)}km)</small>`:''}</span>
+                    <span class="btn-group">
+                      <a class="btn btn-sm btn-outline-primary" href="${mapUrl}" target="_blank"><i class="fas fa-map"></i> 지도</a>
+                      ${dirUrl ? `<a class=\"btn btn-sm btn-outline-secondary\" href=\"${dirUrl}\" target=\"_blank\"><i class=\"fas fa-route\"></i> 길찾기</a>` : ''}
+                    </span>
                 </li>`;
             };
             hospBox.innerHTML = hospitals.length ? hospitals.map(toItem).join('') : '<li>검색 결과 없음</li>';
