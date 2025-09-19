@@ -1,5 +1,7 @@
 import os
+import sys
 import importlib
+from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
@@ -12,6 +14,11 @@ def client():
     os.environ["ADMIN_PASS"] = "testpass"
 
     # 애플리케이션 로드/갱신
+    # 프로젝트 루트를 import 경로에 추가 (CI에서 tests 디렉토리만 잡히는 경우 대비)
+    project_root = Path(__file__).resolve().parents[1]
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
     import main  # type: ignore
     importlib.reload(main)
 
