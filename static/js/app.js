@@ -160,7 +160,11 @@ document.addEventListener('DOMContentLoaded', function() {
 // 현재 위치 가져오기
 function getCurrentLocation() {
     if (!navigator.geolocation) {
-        alert('이 브라우저는 위치 서비스를 지원하지 않습니다.');
+        const help = document.getElementById('geoHelp');
+        if (help) {
+            help.style.display = 'block';
+            help.innerHTML = '<strong>위치 서비스 미지원</strong><br>이 브라우저는 위치 서비스를 지원하지 않습니다. 랜덤 도쿄 또는 신주쿠 고정 위치 버튼을 사용해주세요.';
+        }
         return;
     }
     
@@ -179,19 +183,23 @@ function getCurrentLocation() {
             let message = '위치를 가져올 수 없습니다. ';
             switch(error.code) {
                 case error.PERMISSION_DENIED:
-                    message += '위치 접근이 거부되었습니다.';
+                    message += '브라우저에서 위치 접근이 거부되었습니다. 주소창의 자물쇠 아이콘을 눌러 위치 권한을 "허용"으로 변경한 뒤 새로고침하세요.';
                     break;
                 case error.POSITION_UNAVAILABLE:
-                    message += '위치 정보를 사용할 수 없습니다.';
+                    message += '위치 정보를 사용할 수 없습니다. HTTPS에서 접속 중인지 확인해주세요.';
                     break;
                 case error.TIMEOUT:
-                    message += '위치 요청이 시간 초과되었습니다.';
+                    message += '위치 요청이 시간 초과되었습니다. 네트워크 상태를 확인하고 다시 시도하세요.';
                     break;
                 default:
                     message += '알 수 없는 오류가 발생했습니다.';
                     break;
             }
-            alert(message);
+            const help = document.getElementById('geoHelp');
+            if (help) {
+                help.style.display = 'block';
+                help.innerHTML = `${message}<br><small>대안: 랜덤 도쿄 위치 또는 신주쿠 고정 위치 버튼을 사용해 주세요.</small>`;
+            }
         }
     );
 }
