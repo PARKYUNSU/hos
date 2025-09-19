@@ -331,13 +331,13 @@ async function loadSettings() {
         <div class="row">
             <div class="col-md-6">
                 <div class="mb-3">
-                    <label class="form-label">MVP_FIXED_LAT (고정 위도)</label>
+                    <label class="form-label" title="테스트/디버그용으로 사용할 위도 값을 고정합니다.">고정 위도</label>
                     <input type="number" class="form-control" id="fixedLat" value="35.6762" step="any">
                 </div>
             </div>
             <div class="col-md-6">
                 <div class="mb-3">
-                    <label class="form-label">MVP_FIXED_LON (고정 경도)</label>
+                    <label class="form-label" title="테스트/디버그용으로 사용할 경도 값을 고정합니다.">고정 경도</label>
                     <input type="number" class="form-control" id="fixedLon" value="139.6503" step="any">
                 </div>
             </div>
