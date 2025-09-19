@@ -200,8 +200,36 @@ function getCurrentLocation() {
                 help.style.display = 'block';
                 help.innerHTML = `${message}<br><small>대안: 랜덤 도쿄 위치 또는 신주쿠 고정 위치 버튼을 사용해 주세요.</small>`;
             }
+
+            // HTTP 환경 등으로 geolocation이 불가할 때, IP 기반 대략적 위치로 폴백 시도
+            // 보안 맥락이 아닌 경우에만 시도 (HTTPS라면 권한 설정 안내를 우선)
+            try {
+                if (location.protocol !== 'https:') {
+                    fetchApproxLocationByIP()
+                        .then(({ lat, lon }) => {
+                            if (lat != null && lon != null) {
+                                latInput.value = lat.toFixed(6);
+                                lonInput.value = lon.toFixed(6);
+                                if (help) {
+                                    help.innerHTML += '<br><small>IP 기반 대략적 위치가 자동 입력되었습니다.</small>';
+                                }
+                            }
+                        })
+                        .catch(() => {});
+                }
+            } catch (e) { /* noop */ }
         }
     );
+}
+
+async function fetchApproxLocationByIP() {
+    // ipapi.co는 CORS 허용, latitude/longitude 제공
+    const res = await fetch('https://ipapi.co/json/');
+    if (!res.ok) throw new Error('ip geo failed');
+    const data = await res.json();
+    const lat = parseFloat(data.latitude);
+    const lon = parseFloat(data.longitude);
+    return { lat, lon };
 }
 
 // 랜덤 도쿄 위치 설정 (테스트 모드)
