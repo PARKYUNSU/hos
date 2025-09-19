@@ -217,27 +217,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-      // 테스트 모드일 경우 페이지 로드 시 위치 자동 채움 (랜덤 또는 고정 우선순위)
-      document.addEventListener('DOMContentLoaded', () => {
-        try {
-          const testMode = {{ 'true' if test_mode else 'false' }};
-          const fixedShinjuku = {{ 'true' if fixed_shinjuku else 'false' }};
-          if (testMode || fixedShinjuku) {
-            if (fixedShinjuku) {
-              document.getElementById('latitude').value = '35.6909';
-              document.getElementById('longitude').value = '139.7006';
-            } else {
-              // 랜덤 도쿄
-              const centerLat = 35.6762; const centerLon = 139.6503; const range = 0.06;
-              const lat = centerLat + (Math.random() - 0.5) * range;
-              const lon = centerLon + (Math.random() - 0.5) * range;
-              document.getElementById('latitude').value = lat.toFixed(6);
-              document.getElementById('longitude').value = lon.toFixed(6);
-            }
-          }
-        } catch (e) {}
-      });
+      // 기본값 자동 입력을 비활성화하고, 버튼으로만 위치를 설정합니다.
     </script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=20250919-1"></script>
 </body>
 </html>
