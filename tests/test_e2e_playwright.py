@@ -18,7 +18,15 @@ def _start_server(port: int = 8010):
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
-    import main  # type: ignore
+    try:
+        import main  # type: ignore
+    except ModuleNotFoundError:
+        # 경로 기반 로드 폴백
+        from importlib.machinery import SourceFileLoader
+        main_path = project_root / "main.py"
+        module = SourceFileLoader("main", str(main_path)).load_module()  # type: ignore[deprecated]
+        sys.modules["main"] = module
+        import main  # type: ignore  # noqa: F401
 
     importlib.reload(main)
 
