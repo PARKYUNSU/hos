@@ -328,20 +328,6 @@ async function loadSettings() {
                 </div>
             </div>
         </div>
-        <div class="row">
-            <div class="col-md-6">
-                <div class="mb-3">
-                    <label class="form-label" title="테스트/디버그용으로 사용할 위도 값을 고정합니다.">고정 위도</label>
-                    <input type="number" class="form-control" id="fixedLat" value="35.6762" step="any">
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="mb-3">
-                    <label class="form-label" title="테스트/디버그용으로 사용할 경도 값을 고정합니다.">고정 경도</label>
-                    <input type="number" class="form-control" id="fixedLon" value="139.6503" step="any">
-                </div>
-            </div>
-        </div>
         <button class="btn btn-primary" onclick="saveSettings()">
             <i class="fas fa-save"></i> 설정 저장
         </button>
@@ -591,9 +577,7 @@ function saveSettings() {
         USE_PLAYWRIGHT_CRAWLING: document.getElementById('playwrightCrawling').value,
         CRAWL_MAX_LINKS_PER_SITE: document.getElementById('maxLinks').value,
         MVP_RANDOM_TOKYO: document.getElementById('randomTokyo').value,
-        MVP_FIXED_SHINJUKU: document.getElementById('fixedShinjuku').value,
-        MVP_FIXED_LAT: document.getElementById('fixedLat').value,
-        MVP_FIXED_LON: document.getElementById('fixedLon').value
+        MVP_FIXED_SHINJUKU: document.getElementById('fixedShinjuku').value
     };
     
     // 실제로는 API 엔드포인트로 설정 저장
