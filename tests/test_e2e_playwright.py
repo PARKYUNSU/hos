@@ -1,7 +1,9 @@
 import os
+import sys
 import time
 import threading
 import importlib
+from pathlib import Path
 import requests
 import pytest
 
@@ -10,6 +12,11 @@ def _start_server(port: int = 8010):
     os.environ["FAST_MODE"] = "1"
     os.environ["ADMIN_USER"] = "admin"
     os.environ["ADMIN_PASS"] = "testpass"
+
+    # 프로젝트 루트를 import 경로에 추가
+    project_root = Path(__file__).resolve().parents[1]
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
 
     import main  # type: ignore
 

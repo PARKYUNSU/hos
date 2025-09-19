@@ -5,6 +5,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+# 프로젝트 루트를 import 경로에 항상 추가 (모든 테스트 공통)
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 
 @pytest.fixture(scope="session")
 def client():
