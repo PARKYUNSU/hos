@@ -16,6 +16,7 @@ sys.path.append('backend')
 from services_logging import symptom_logger
 from services_auto_crawler import auto_crawler
 from services_rag_updater import rag_updater
+from scripts.regrade_quality import main as regrade_quality_main  # 품질 재산정
 
 # 로깅 설정
 logging.basicConfig(
@@ -87,6 +88,16 @@ def run_system_cleanup():
     except Exception as e:
         logging.error(f"시스템 정리 중 오류 발생: {e}")
 
+
+def run_quality_regrade():
+    """로그 품질(advice_quality) 재산정 (기준: rag_confidence > 0.6 → good)."""
+    logging.info("품질 재산정 작업 시작")
+    try:
+        regrade_quality_main()
+        logging.info("품질 재산정 작업 완료")
+    except Exception as e:
+        logging.error(f"품질 재산정 중 오류 발생: {e}")
+
 def run_health_check():
     """시스템 상태를 확인합니다."""
     logging.info("시스템 상태 확인")
@@ -129,6 +140,9 @@ def main():
     
     # 매일 자정에 시스템 정리
     schedule.every().day.at("00:00").do(run_system_cleanup)
+
+    # 매일 03:00 KST 품질 재산정 (로그 레이블 보정)
+    schedule.every().day.at("03:00").do(run_quality_regrade)
     
     # 매 30분마다 시스템 상태 확인
     schedule.every(30).minutes.do(run_health_check)
@@ -142,6 +156,7 @@ def main():
     logging.info("- 매 시간: 미처리 증상 크롤링")
     logging.info("- 매 6시간: RAG 시스템 업데이트")
     logging.info("- 매일 자정: 시스템 정리")
+    logging.info("- 매일 03:00: 품질 재산정(regrade)")
     logging.info("- 매 30분: 시스템 상태 확인")
     
     # 스케줄러 실행
