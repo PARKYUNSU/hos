@@ -32,7 +32,13 @@ def client():
         setattr(services_gen, "generate_advice", _fake_generate_advice)
     except Exception:
         # main 모듈에 직접 바인딩된 심볼도 교체
+        pass
+
+    # main 모듈이 from services_gen import generate_advice 로 바인딩한 참조도 교체
+    try:
         setattr(main, "generate_advice", _fake_generate_advice)
+    except Exception:
+        pass
 
     return TestClient(main.app)
 

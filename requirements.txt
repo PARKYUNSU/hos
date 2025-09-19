@@ -29,8 +29,7 @@ PyMuPDF==1.23.8
 pdfplumber==0.10.3
 PyPDF2==3.0.1
 
-# Database
-sqlite3  # Built-in with Python
+# Database (sqlite3는 표준 라이브러리 포함이므로 별도 설치 불필요)
 
 # Image processing
 Pillow==10.1.0
