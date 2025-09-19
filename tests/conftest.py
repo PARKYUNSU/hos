@@ -55,3 +55,18 @@ def admin_auth():
     return (os.getenv("ADMIN_USER", "admin"), os.getenv("ADMIN_PASS", "testpass"))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def seed_crawling_job():
+    # 테스트용 크롤링 작업 1건 시드 (존재하면 무시)
+    try:
+        import main  # type: ignore
+        logger = getattr(main, "symptom_logger", None)
+        if logger is None:
+            return
+        job_id = logger.create_crawling_job(["テスト", "응급"], ["jrc", "mhlw_health"])  # type: ignore[attr-defined]
+        # 완료 처리로 마크
+        logger.update_crawling_job(job_id, status="completed", results_count=1, error_message=None)  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
