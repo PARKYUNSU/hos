@@ -277,7 +277,7 @@ async function loadSettings() {
         <div class="row">
             <div class="col-md-6">
                 <div class="mb-3">
-                    <label class="form-label">AUTO_REINDEX_ON_CRAWL</label>
+                    <label class="form-label" title="크롤링이 끝나면 RAG 색인을 자동으로 다시 만듭니다.">크롤링 후 자동 재색인</label>
                     <select class="form-select" id="autoReindex">
                         <option value="1">활성</option>
                         <option value="0">비활성</option>
@@ -286,7 +286,7 @@ async function loadSettings() {
             </div>
             <div class="col-md-6">
                 <div class="mb-3">
-                    <label class="form-label">REINDEX_DEBOUNCE_SEC</label>
+                    <label class="form-label" title="연속 요청 시 과부하 방지를 위해 재색인 간 최소 간격(초)">재색인 지연(초)</label>
                     <input type="number" class="form-control" id="debounceSec" value="120" min="60" max="600">
                 </div>
             </div>
@@ -294,7 +294,7 @@ async function loadSettings() {
         <div class="row">
             <div class="col-md-6">
                 <div class="mb-3">
-                    <label class="form-label">USE_PLAYWRIGHT_CRAWLING</label>
+                    <label class="form-label" title="동적 페이지 렌더링이 필요한 크롤링을 수행합니다.">Playwright 크롤링 사용</label>
                     <select class="form-select" id="playwrightCrawling">
                         <option value="1">활성</option>
                         <option value="0">비활성</option>
@@ -303,7 +303,7 @@ async function loadSettings() {
             </div>
             <div class="col-md-6">
                 <div class="mb-3">
-                    <label class="form-label">CRAWL_MAX_LINKS_PER_SITE</label>
+                    <label class="form-label" title="각 사이트에서 따라갈 최대 링크 수">사이트당 최대 링크 수</label>
                     <input type="number" class="form-control" id="maxLinks" value="8" min="1" max="20">
                 </div>
             </div>
@@ -311,7 +311,7 @@ async function loadSettings() {
         <div class="row">
             <div class="col-md-6">
                 <div class="mb-3">
-                    <label class="form-label">MVP_RANDOM_TOKYO (테스트 모드)</label>
+                    <label class="form-label" title="테스트용: 도쿄 중심 랜덤 위치 자동 입력">랜덤 도쿄 위치(테스트 모드)</label>
                     <select class="form-select" id="randomTokyo">
                         <option value="1">활성</option>
                         <option value="0">비활성</option>
@@ -320,7 +320,7 @@ async function loadSettings() {
             </div>
             <div class="col-md-6">
                 <div class="mb-3">
-                    <label class="form-label">MVP_FIXED_SHINJUKU (고정 위치)</label>
+                    <label class="form-label" title="테스트용: 신주쿠 좌표를 고정 사용">신주쿠 고정 위치</label>
                     <select class="form-select" id="fixedShinjuku">
                         <option value="1">활성</option>
                         <option value="0">비활성</option>
