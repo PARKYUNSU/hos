@@ -242,6 +242,18 @@ spec:
    ```
 
 ### 로그 확인
+## 🧪 부하 테스트(선택)
+
+### k6 스모크 테스트
+```bash
+BASE_URL=http://127.0.0.1:8000 ADMIN_USER=admin ADMIN_PASS=pass k6 run scripts/load/k6_smoke.js
+```
+
+### Locust 테스트
+```bash
+pip install locust
+ADMIN_USER=admin ADMIN_PASS=pass locust -f scripts/load/locustfile.py --host http://127.0.0.1:8000
+```
 ```bash
 # 애플리케이션 로그
 docker logs hos-app
