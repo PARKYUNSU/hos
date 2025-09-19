@@ -86,6 +86,9 @@ function showTab(tabName) {
         case 'stats':
             loadStats();
             break;
+        case 'crawling':
+            loadCrawlingJobs();
+            break;
         case 'settings':
             loadSettings();
             break;
@@ -207,7 +210,7 @@ async function loadLogs() {
                     </span>
                 </td>
                 <td>
-                    <i class="fas fa-${log.image_uploaded ? 'camera text-success' : 'times text-muted'}"></i>
+                    ${log.image_uploaded ? `<button class="btn btn-sm btn-outline-secondary" onclick="showImage(${log.id})"><i class=\"fas fa-camera\"></i></button>` : '<i class="fas fa-times text-muted"></i>'}
                 </td>
                 <td>
                     <button class="btn btn-sm btn-outline-primary" onclick="showAdvice(${log.id})">
@@ -358,6 +361,43 @@ async function loadSettings() {
         </div>
     `;
 }
+
+// 크롤링 작업 로드 (DB 기반 뷰)
+async function loadCrawlingJobs() {
+    try {
+        const res = await fetch('/api/crawling_jobs?limit=50');
+        const jobs = await res.json();
+        const tbody = document.getElementById('crawlJobsTable');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        jobs.forEach(j => {
+          // 키워드/사이트 목록을 사람이 읽기 좋게 파싱
+          let kw = j.symptom_keywords || '';
+          try {
+            const arr = JSON.parse(kw);
+            if (Array.isArray(arr)) kw = arr.join(', ');
+          } catch (e) { /* 그대로 표시 */ }
+          let sites = j.target_sites || '';
+          try {
+            const arr2 = JSON.parse(sites);
+            if (Array.isArray(arr2)) sites = arr2.join(', ');
+          } catch (e) { /* 그대로 표시 */ }
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${j.id}</td>
+            <td>${kw}</td>
+            <td>${sites}</td>
+            <td>${(j.status||'')}</td>
+            <td>${(j.results_count||0)}</td>
+            <td>${(j.completed_at ? new Date(j.completed_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '')}</td>
+          `;
+          tr.title = j.error_message || '';
+          tbody.appendChild(tr);
+        });
+    } catch (e) {
+        console.error('크롤링 작업 로드 오류:', e);
+    }
+}
 // 규칙 백업/복구
 function backupOtcRules() {
   try {
@@ -392,7 +432,7 @@ function restoreOtcRules(evt) {
 
 // 신뢰도 배지 클래스 반환
 function getConfidenceBadgeClass(confidence) {
-    if (confidence >= 0.7) return 'bg-success';
+    if (confidence >= 0.6) return 'bg-success';
     if (confidence >= 0.4) return 'bg-warning';
     return 'bg-danger';
 }
@@ -525,6 +565,21 @@ async function showAdvice(logId) {
         }
     } catch (e) {
         showNotification('조언 로드 실패: ' + e, 'error');
+    }
+}
+
+// 이미지 보기
+async function showImage(logId) {
+    try {
+        const imgEl = document.getElementById('logImage');
+        if (imgEl) imgEl.src = `/api/image/${logId}`;
+        const modalEl = document.getElementById('imageModal');
+        if (modalEl) {
+            const modal = new bootstrap.Modal(modalEl);
+            modal.show();
+        }
+    } catch (e) {
+        showNotification('이미지 로드 실패: ' + e, 'error');
     }
 }
 
