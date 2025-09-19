@@ -106,7 +106,15 @@ class SymptomLogger:
         
         # RAG 결과 분석
         rag_count = len(rag_results) if rag_results else 0
-        rag_confidence = max([score for _, score in rag_results]) if rag_results else 0.0
+        # rag_results가 softmax 확률(0~1)이라고 가정하고 최대값 사용, 범위 보정
+        try:
+            rag_confidence = max([float(score) for _, score in (rag_results or [])]) if rag_results else 0.0
+            if rag_confidence < 0.0:
+                rag_confidence = 0.0
+            if rag_confidence > 1.0:
+                rag_confidence = 1.0
+        except Exception:
+            rag_confidence = 0.0
         
         # 위치 정보
         lat, lon = location if location else (None, None)

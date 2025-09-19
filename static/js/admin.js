@@ -160,7 +160,7 @@ async function loadRealtimeLogs() {
             logElement.innerHTML = `
                 <div class="d-flex justify-content-between">
                     <div>
-                        <strong>${log.timestamp}</strong> - ${log.user_input.substring(0, 50)}...
+                        <strong>${new Date(log.timestamp).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</strong> - ${log.user_input.substring(0, 50)}...
                     </div>
                     <div>
                         <span class="badge ${getConfidenceBadgeClass(log.rag_confidence)}">
@@ -193,7 +193,7 @@ async function loadLogs() {
         logs.forEach(log => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${new Date(log.timestamp).toLocaleString()}</td>
+                <td>${new Date(log.timestamp).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</td>
                 <td>${log.user_input}</td>
                 <td>
                     <span class="badge ${getConfidenceBadgeClass(log.rag_confidence)}">
@@ -454,19 +454,21 @@ async function updateTimeSeriesChart() {
       const logs = await res.json();
       // 최근 24시간을 시:00 단위로 그룹핑
       const buckets = new Map();
+      const fmtHour = new Intl.DateTimeFormat('ko-KR', {
+        timeZone: 'Asia/Seoul', year: undefined, month: undefined, day: undefined,
+        hour: '2-digit', minute: '2-digit', hour12: false
+      });
       const now = new Date();
       for (let i=0;i<24;i++) {
-        const d = new Date(now.getTime()-i*3600000);
-        d.setMinutes(0,0,0);
-        buckets.set(d.toISOString().slice(11,16), 0);
+        const d = new Date(now.getTime() - i * 3600000);
+        const key = fmtHour.format(d).replace(/^(\d{2}):\d{2}$/,'$1:00');
+        if (!buckets.has(key)) buckets.set(key, 0);
       }
       logs.forEach(l => {
         const t = new Date(l.timestamp);
         if (isNaN(t.getTime())) return;
-        const h = new Date(t.getTime());
-        h.setMinutes(0,0,0);
-        const key = h.toISOString().slice(11,16); // HH:00
-        if (buckets.has(key)) buckets.set(key, (buckets.get(key)||0)+1);
+        const key = fmtHour.format(t).replace(/^(\d{2}):\d{2}$/,'$1:00');
+        if (buckets.has(key)) buckets.set(key, (buckets.get(key)||0) + 1);
       });
       const labels = Array.from(buckets.keys()).reverse();
       const data = labels.map(k => buckets.get(k));
@@ -497,9 +499,33 @@ async function updateTimeSeriesChart() {
 }
 
 // 조언 내용 표시
-function showAdvice(logId) {
-    // 모달이나 새 창에서 조언 내용 표시
-    alert(`로그 ID ${logId}의 조언 내용을 표시합니다.`);
+async function showAdvice(logId) {
+    try {
+        // 최근 로그에서 해당 ID를 찾아 조언을 표시 (간단 구현: /api/logs 응답에서 조회)
+        const limit = document.getElementById('logLimit').value || 100;
+        const res = await fetch(`/api/logs?limit=${limit}`);
+        const logs = await res.json();
+        const log = logs.find(l => l.id === logId);
+        const content = (log && log.advice_content) ? log.advice_content : '조언 내용이 저장되지 않았습니다.';
+
+        const container = document.getElementById('adviceContent');
+        if (container) {
+            try {
+                // marked를 이용해 Markdown을 HTML로 렌더링하고 DOMPurify로 안전화
+                const html = marked.parse(content || '');
+                container.innerHTML = DOMPurify.sanitize(html);
+            } catch (e) {
+                container.textContent = content || '';
+            }
+        }
+        const modalEl = document.getElementById('adviceModal');
+        if (modalEl) {
+            const modal = new bootstrap.Modal(modalEl);
+            modal.show();
+        }
+    } catch (e) {
+        showNotification('조언 로드 실패: ' + e, 'error');
+    }
 }
 
 // 설정 저장

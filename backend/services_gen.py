@@ -4,20 +4,35 @@ from pathlib import Path
 import json
 import base64
 from openai import OpenAI
-import streamlit as st
+try:
+    import streamlit as st  # 선택적 의존성
+except Exception:
+    st = None  # 서버 환경에서 streamlit 미설치 시 안전하게 처리
 
 
 def get_client() -> Optional[OpenAI]:
-    # Streamlit Cloud에서는 st.secrets 사용, 로컬에서는 os.getenv 사용
+    """OpenAI 클라이언트를 생성합니다. 전역 타임아웃을 적용합니다."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    # Streamlit secrets가 있는 경우 우선 사용
     try:
-        api_key = st.secrets['secrets']['OPENAI_API_KEY']
-    except:
-        api_key = os.getenv("OPENAI_API_KEY")
-    
+        if st and hasattr(st, "secrets"):
+            sec = st.secrets  # type: ignore[attr-defined]
+            k = None
+            # st.secrets 형태가 환경마다 달라 안전하게 접근
+            if isinstance(sec, dict):
+                k = sec.get("secrets", {}).get("OPENAI_API_KEY") or sec.get("OPENAI_API_KEY")
+            else:
+                k = getattr(sec, "OPENAI_API_KEY", None)
+            if k:
+                api_key = k
+    except Exception:
+        pass
+
     if not api_key:
         return None
     try:
-        return OpenAI(api_key=api_key)
+        timeout_sec = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "12"))
+        return OpenAI(api_key=api_key, timeout=timeout_sec)
     except Exception as e:
         print(f"OpenAI 클라이언트 초기화 오류: {e}")
         return None
@@ -83,19 +98,22 @@ def generate_advice(symptoms: str, findings: str, passages: List, client: Option
             }
         )
 
-    # 모델 선택: 이미지가 있으면 gpt-4o, 없으면 gpt-4o-mini
-    model = "gpt-4o" if image_bytes else "gpt-4o-mini"
+    # 모델/토큰/온도 환경변수로 제어
+    model_default = "gpt-4o" if image_bytes else "gpt-4o-mini"
+    model = os.getenv("OPENAI_MODEL_TEXT", model_default)
+    max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "600"))
+    temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.1"))
     
     try:
+        # client에 전역 timeout이 적용되어 있으므로 per-request timeout은 지정하지 않음
         completion = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
             ],
-            temperature=0.1,  # 0.2 -> 0.1로 낮춰서 일관성 향상
-            max_tokens=300,   # 400 -> 300으로 더 줄여서 속도 개선
-            timeout=8,        # 타임아웃을 8초로 단축
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
         advice = completion.choices[0].message.content or ""
         
@@ -172,9 +190,16 @@ def generate_advice(symptoms: str, findings: str, passages: List, client: Option
             'otc': otc,
             'is_default_advice': False
         }
-    except Exception as e:
+    except Exception:
+        # 사용자에게 내부 오류 문구를 노출하지 않고 안전한 기본 조언 제공
+        fallback = (
+            "현재 네트워크 지연으로 기본 조언을 안내드립니다. 증상이 심해지거나,"
+            " 119(일본) 호출 기준에 해당하면 즉시 119로 연락하세요. 필요 시 약국에서는"
+            " 아세트아미노펜 성분의 해열진통제를 우선 고려하세요. 임산부·영유아·기저질환자는"
+            " 복용 전 반드시 의사·약사 상담이 필요합니다."
+        )
         return {
-            'advice': f"LLM 오류: {str(e)}",
+            'advice': fallback,
             'otc': [],
             'is_default_advice': True
         }

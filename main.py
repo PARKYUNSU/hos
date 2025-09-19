@@ -17,6 +17,10 @@ import json
 import os
 import sys
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except Exception:
+    ZoneInfo = None  # Fallback: no tzinfo available
 from dotenv import load_dotenv
 from functools import lru_cache
 import hashlib
@@ -24,22 +28,30 @@ import logging
 import io
 from PIL import Image
 import numpy as np
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+import secrets
 
 # 백엔드 서비스 임포트
 sys.path.append('backend')
+# FAST_MODE에서는 무거운 RAG 초기화를 건너뛰어 메모리 사용을 줄임
+FAST_MODE = os.getenv('FAST_MODE', '0').lower() in ('1', 'true', 'on', 'yes')
+GLOBAL_RAG = None
+symptom_logger = None
+auto_crawl_unhandled_symptoms = None
 try:
     from services_gen import generate_advice
-    from services_rag import GLOBAL_RAG
-    from services_logging import symptom_logger
-    from services_auto_crawler import auto_crawl_unhandled_symptoms
+    if not FAST_MODE:
+        from services_rag import GLOBAL_RAG as _GLOBAL_RAG
+        GLOBAL_RAG = _GLOBAL_RAG
+    from services_logging import symptom_logger  # type: ignore
+    from services_auto_crawler import auto_crawl_unhandled_symptoms  # type: ignore
     from services_playwright_crawler import is_playwright_enabled
     from otc_rules import load_rules, save_rules
 except ImportError as e:
     print(f"백엔드 서비스 임포트 오류: {e}")
-    # 기본값 설정
-    GLOBAL_RAG = None
-    symptom_logger = None
-    auto_crawl_unhandled_symptoms = None
+    # Playwright 의존성이 없거나 기타 임포트 실패 시에도 헬스 체크가 동작하도록 폴백 제공
+    def is_playwright_enabled() -> bool:  # type: ignore
+        return False
 
 # 단순화된 설정 (임포트 성공 시 실제 함수 사용)
 
@@ -74,6 +86,22 @@ app.add_middleware(
 # 정적 파일 및 템플릿 설정
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+
+# --- Admin authentication (HTTP Basic) ---
+security = HTTPBasic()
+
+def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> None:
+    user = os.getenv("ADMIN_USER", "")
+    pw = os.getenv("ADMIN_PASS", "")
+    ok = (
+        bool(user)
+        and bool(pw)
+        and secrets.compare_digest(credentials.username, user)
+        and secrets.compare_digest(credentials.password, pw)
+    )
+    if not ok:
+        # 인증 실패 시 401과 함께 WWW-Authenticate 헤더 반환
+        raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": "Basic"})
 
 # WebSocket 연결 관리
 class ConnectionManager:
@@ -206,7 +234,7 @@ async def read_root():
         "fixed_lon": fixed_lon
     })
 
-@app.get("/admin", response_class=HTMLResponse)
+@app.get("/admin", response_class=HTMLResponse, dependencies=[Depends(require_admin)])
 async def admin_dashboard():
     """관리자 대시보드"""
     return templates.TemplateResponse("admin.html", {"request": {}})
@@ -302,17 +330,47 @@ async def get_advice(
         # RAG 검색(다중 증상 late merge)
         rag_passages = []
         rag_confidence = 0.0
-        merged_hits = []
+        merged_hits = []  # (passage, raw_score)
         if GLOBAL_RAG:
             try:
                 queries = symptom_list or [symptom]
                 for q in queries:
                     hits = GLOBAL_RAG.search(q, top_k=3)
                     merged_hits.extend(hits)
-                # 상위 근거 추출
+                # 상위 근거 추출 (raw score 기준 정렬)
                 merged_hits = sorted(merged_hits, key=lambda x: x[1], reverse=True)[:3]
                 rag_passages = [p for p, _ in merged_hits]
-                rag_confidence = max([s for _, s in merged_hits]) if merged_hits else 0.0
+                # softmax 정규화로 0~1 신뢰도 계산
+                try:
+                    import math
+                    raw_scores = [float(s) for _, s in merged_hits]
+                    if raw_scores:
+                        max_s = max(raw_scores)
+                        exps = [math.exp(s - max_s) for s in raw_scores]
+                        denom = sum(exps) or 1.0
+                        probs = [e / denom for e in exps]
+                        # 최상위 문서 확률을 신뢰도로 사용 (softmax top-1)
+                        rag_confidence = float(probs[0]) if probs else 0.0
+                        # 로깅 일관성을 위해 정규화 점수를 함께 유지
+                        merged_hits = [(rag_passages[i], probs[i]) for i in range(len(rag_passages))]
+                    else:
+                        rag_confidence = 0.0
+                except Exception:
+                    # 실패 시 이전 방식의 상한 없는 점수 최대값을 1.0으로 클램프
+                    try:
+                        rag_confidence = max([s for _, s in merged_hits]) if merged_hits else 0.0
+                        if rag_confidence > 1.0:
+                            rag_confidence = 1.0
+                    except Exception:
+                        rag_confidence = 0.0
+                # 안전 클램프 (0~1)
+                try:
+                    if rag_confidence < 0.0:
+                        rag_confidence = 0.0
+                    if rag_confidence > 1.0:
+                        rag_confidence = 1.0
+                except Exception:
+                    rag_confidence = 0.0
             except Exception as e:
                 logger.error(f"RAG search error: {e}")
         
@@ -328,8 +386,8 @@ async def get_advice(
         
         processing_time = (datetime.now() - start_time).total_seconds()
         
-        # 크롤링 필요성 판단
-        needs_crawling = rag_confidence < 0.7
+        # 크롤링 필요성 판단 (정규화된 신뢰도 기준)
+        needs_crawling = rag_confidence < 0.6
 
         # 참고문헌 스니펫 구성
         references: List[str] = []
@@ -342,20 +400,28 @@ async def get_advice(
         nearby_hospitals: List[Dict[str, Any]] = []
         nearby_pharmacies: List[Dict[str, Any]] = []
         try:
-            if lat and lon:
+            # 환경변수로 POI 조회 비활성화 옵션 제공 (지연 시 단기 성능 대응)
+            disable_poi = (os.getenv("DISABLE_POI", "0").lower() in ("1", "true", "on", "yes"))
+            if lat and lon and not disable_poi:
                 # Overpass API로 간단 검색
                 def search_pois(amenity: str) -> List[Dict[str, Any]]:
                     # Overpass에서 충분한 후보를 받아온 뒤, 거리 계산해 가까운 순 5개만 반환
+                    poi_timeout = int(os.getenv("POI_TIMEOUT_SEC", "6"))
+                    radius_m = int(os.getenv("POI_RADIUS_M", "1500"))
                     query = f"""
-                    [out:json][timeout:10];
+                    [out:json][timeout:{poi_timeout}];
                     (
-                      node["amenity"="{amenity}"](around:2000,{lat},{lon});
-                      way["amenity"="{amenity}"](around:2000,{lat},{lon});
-                      relation["amenity"="{amenity}"](around:2000,{lat},{lon});
+                      node["amenity"="{amenity}"](around:{radius_m},{lat},{lon});
+                      way["amenity"="{amenity}"](around:{radius_m},{lat},{lon});
+                      relation["amenity"="{amenity}"](around:{radius_m},{lat},{lon});
                     );
                     out center 50;
                     """
-                    r = requests.post("https://overpass-api.de/api/interpreter", data={"data": query}, timeout=10)
+                    r = requests.post(
+                        "https://overpass-api.de/api/interpreter",
+                        data={"data": query},
+                        timeout=poi_timeout,
+                    )
                     r.raise_for_status()
                     js = r.json()
                     res: List[Dict[str, Any]] = []
@@ -400,6 +466,7 @@ async def get_advice(
             symptom_logger.log_symptom(
                 user_input=symptom,
                 advice_content=advice_result['advice'],
+                # merged_hits는 (passage, prob) 형식으로 softmax 정규화됨
                 rag_results=merged_hits if GLOBAL_RAG else [],
                 processing_time=processing_time,
                 advice_quality='good' if rag_confidence > 0.7 else 'poor',
@@ -435,15 +502,30 @@ async def get_advice(
         logger.error(f"Advice generation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/logs", response_model=List[LogEntry])
+@app.get("/api/logs", response_model=List[LogEntry], dependencies=[Depends(require_admin)])
 async def get_logs(limit: int = 50):
     """증상 로그 조회"""
     try:
         logs = symptom_logger.get_recent_logs(limit=limit)
+        # 출력은 한국시간(Asia/Seoul) 기준으로 변환
+        tz_kst = ZoneInfo("Asia/Seoul") if ZoneInfo else None
+        tz_utc = ZoneInfo("UTC") if ZoneInfo else None
         return [
             LogEntry(
                 id=log['id'],
-                timestamp=log['timestamp'],
+                timestamp=(
+                    (
+                        # timezone-aware 변환
+                        datetime.fromisoformat(
+                            log['timestamp'].replace('Z', '+00:00')
+                        )
+                        if ('timestamp' in log and isinstance(log['timestamp'], str)) else datetime.now()
+                    )
+                    .replace(tzinfo=(tz_utc if tz_utc else None))
+                    .astimezone(tz_kst)  # type: ignore[arg-type]
+                    .isoformat()
+                    if tz_kst else log.get('timestamp', '')
+                ),
                 user_input=log['user_input'],
                 advice_content=log.get('advice_content', ''),
                 rag_confidence=float(log['rag_confidence']) if log['rag_confidence'] else 0.0,
@@ -457,7 +539,7 @@ async def get_logs(limit: int = 50):
         logger.error(f"Log retrieval error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/stats")
+@app.get("/api/stats", dependencies=[Depends(require_admin)])
 async def get_stats():
     """시스템 통계"""
     try:
@@ -562,7 +644,9 @@ async def health_check():
     """헬스 체크"""
     return {
         "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": (
+            datetime.now(ZoneInfo("Asia/Seoul")).isoformat() if ZoneInfo else datetime.now().isoformat()
+        ),
         "rag_loaded": GLOBAL_RAG is not None,
         "playwright_enabled": is_playwright_enabled(),
         "use_playwright_env": os.getenv("USE_PLAYWRIGHT_CRAWLING"),

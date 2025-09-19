@@ -1,6 +1,7 @@
 from typing import List, Tuple
 import pathlib
 import re
+import os
 from rank_bm25 import BM25Okapi
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -13,7 +14,8 @@ class HybridRAG:
         self.tokenized = [self._tokenize(p) for p in passages]
         self.bm25 = BM25Okapi(self.tokenized)
         # CJK(한/일) 교차언어 매칭 강화를 위해 문자 n-gram TF-IDF 사용
-        self.vectorizer = TfidfVectorizer(analyzer='char', ngram_range=(2, 5), max_features=25000)
+        max_feats = int(os.getenv("RAG_TFIDF_MAX_FEATURES", "10000"))
+        self.vectorizer = TfidfVectorizer(analyzer='char', ngram_range=(2, 5), max_features=max_feats)
         self.tfidf = self.vectorizer.fit_transform(passages)
         
         # 한국어-일본어 의료 용어 매핑
@@ -186,8 +188,9 @@ def load_disk_passages() -> list[str]:
     pdir = root / "data" / "passages" / "jp"
     if not pdir.exists():
         return []
-    out = []
-    for p in sorted(pdir.glob("*.txt")):
+    out: list[str] = []
+    limit = int(os.getenv("RAG_MAX_PASSAGES", "1000"))
+    for p in sorted(pdir.glob("*.txt"))[:limit]:
         try:
             out.append(p.read_text(encoding="utf-8"))
         except Exception:
@@ -197,6 +200,8 @@ def load_disk_passages() -> list[str]:
 
 def load_rag_data_passages() -> list[str]:
     """RAG 데이터 디렉토리에서 텍스트와 PDF 파일들을 로드"""
+    if os.getenv("RAG_USE_RAG_DATA", "0").lower() not in ("1", "true", "on", "yes"):
+        return []
     root = pathlib.Path(__file__).resolve().parents[1]
     rag_dir = root / "data" / "rag_data"
     
@@ -205,8 +210,9 @@ def load_rag_data_passages() -> list[str]:
     
     passages = []
     
-    # 텍스트 파일들 로드
-    for txt_file in sorted(rag_dir.glob("*.txt")):
+    # 텍스트 파일들 로드 (상한 적용)
+    limit = int(os.getenv("RAG_MAX_PASSAGES", "1000"))
+    for txt_file in sorted(rag_dir.glob("*.txt"))[:max(0, limit - len(passages))]:
         try:
             text = txt_file.read_text(encoding="utf-8")
             if text.strip():
@@ -217,6 +223,7 @@ def load_rag_data_passages() -> list[str]:
     # PDF 파일들 로드
     try:
         from backend.services_pdf_processor import load_pdf_passages
+        # PDF는 메모리 사용량이 크므로 비활성화 기본값(RAG_USE_RAG_DATA=0)
         pdf_passages = load_pdf_passages(str(rag_dir))
         passages.extend(pdf_passages)
         print(f"PDF 파일에서 {len(pdf_passages)}개 패시지 로드됨")
