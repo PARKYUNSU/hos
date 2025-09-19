@@ -6,7 +6,7 @@ HOS Emergency Medical Chatbot - FastAPI Application
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -30,6 +30,7 @@ from PIL import Image
 import numpy as np
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import secrets
+import mimetypes
 
 # 백엔드 서비스 임포트
 sys.path.append('backend')
@@ -203,6 +204,18 @@ class LogEntry(BaseModel):
     processing_time: float
     advice_quality: str
     image_uploaded: bool
+    image_path: Optional[str] = ""
+
+class CrawlingJob(BaseModel):
+    id: int
+    symptom_keywords: str
+    target_sites: str
+    status: str
+    results_count: int
+    error_message: Optional[str] = ""
+    created_at: Optional[str] = ""
+    started_at: Optional[str] = ""
+    completed_at: Optional[str] = ""
 
 # 의존성 주입
 def get_openai_client():
@@ -277,8 +290,24 @@ async def get_advice(
         
         # 이미지 처리
         image_bytes = None
+        saved_image_path: Optional[str] = None
         if image:
             image_bytes = await image.read()
+            # 업로드 이미지를 저장하여 관리자에서 조회 가능하도록 유지 (최근 n개 보관 등은 추후 개선)
+            try:
+                from pathlib import Path
+                base_dir = Path(__file__).resolve().parent
+                uploads_dir = base_dir / 'data' / 'uploads'
+                uploads_dir.mkdir(parents=True, exist_ok=True)
+                fname = datetime.now().strftime('%Y%m%d_%H%M%S') + "_" + (image.filename or 'upload.jpg')
+                # 파일명 안전화
+                safe = ''.join(c if c.isalnum() or c in ('-', '_', '.') else '_' for c in fname)
+                path = uploads_dir / safe
+                with open(str(path), 'wb') as f:
+                    f.write(image_bytes)
+                saved_image_path = str(path)
+            except Exception:
+                saved_image_path = None
             # 이미지 기반 응급 차단 로직 (과다 출혈/화상 의심)
             try:
                 img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
@@ -469,9 +498,10 @@ async def get_advice(
                 # merged_hits는 (passage, prob) 형식으로 softmax 정규화됨
                 rag_results=merged_hits if GLOBAL_RAG else [],
                 processing_time=processing_time,
-                advice_quality='good' if rag_confidence > 0.7 else 'poor',
+                advice_quality='good' if rag_confidence > 0.6 else 'poor',
                 image_uploaded=bool(image_bytes),
-                location=(lat, lon) if lat and lon else None
+                location=(lat, lon) if lat and lon else None,
+                image_path=saved_image_path
             )
         except Exception as e:
             logger.error(f"Logging error: {e}")
@@ -500,6 +530,113 @@ async def get_advice(
         
     except Exception as e:
         logger.error(f"Advice generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/image/{log_id}", dependencies=[Depends(require_admin)])
+async def get_image(log_id: int):
+    """증상 로그에 저장된 업로드 이미지를 반환합니다 (관리자 전용)."""
+    try:
+        # DB에서 직접 조회 (신뢰성 향상)
+        import sqlite3
+        image_path: Optional[str] = None
+        try:
+            conn = sqlite3.connect(symptom_logger.db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT image_path FROM symptom_logs WHERE id = ?", (int(log_id),))
+            row = cur.fetchone()
+            conn.close()
+            if row and row[0]:
+                image_path = row[0]
+        except Exception:
+            image_path = None
+
+        if not image_path:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        # 후보 경로들 구성 (절대/상대 모두 지원)
+        from pathlib import Path
+        candidates: list[Path] = []
+        p = Path(image_path)
+        if p.is_absolute():
+            candidates.append(p)
+        else:
+            base_dir = Path(__file__).resolve().parent
+            candidates.append(base_dir / p)
+            candidates.append(Path.cwd() / p)
+
+        found: Optional[Path] = None
+        for c in candidates:
+            try:
+                if c.exists():
+                    found = c
+                    break
+            except Exception:
+                continue
+        if not found:
+            raise HTTPException(status_code=404, detail="Image not found")
+        image_path = str(found)
+        mime, _ = mimetypes.guess_type(image_path)
+        return FileResponse(image_path, media_type=mime or 'application/octet-stream')
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Image fetch error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load image")
+
+@app.get("/api/crawling_jobs", response_model=List[CrawlingJob], dependencies=[Depends(require_admin)])
+async def get_crawling_jobs(limit: int = 50):
+    """최근 크롤링 작업 목록 (관리자 전용)"""
+    try:
+        import sqlite3
+        rows: list[CrawlingJob] = []
+        conn = sqlite3.connect(symptom_logger.db_path)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, symptom_keywords, target_sites, status, results_count,
+                   error_message, created_at, started_at, completed_at
+            FROM crawling_jobs
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        )
+        # KST(Asia/Seoul)로 타임스탬프 변환
+        tz_kst = ZoneInfo("Asia/Seoul") if ZoneInfo else None
+        tz_utc = ZoneInfo("UTC") if ZoneInfo else None
+
+        def to_kst(ts):
+            try:
+                if not ts:
+                    return ""
+                s = str(ts)
+                dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+                if tz_kst and tz_utc:
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=tz_utc)
+                    return dt.astimezone(tz_kst).isoformat()
+                return s
+            except Exception:
+                return str(ts or "")
+
+        for r in cur.fetchall():
+            rows.append(
+                CrawlingJob(
+                    id=int(r[0]),
+                    symptom_keywords=r[1] or "",
+                    target_sites=r[2] or "",
+                    status=r[3] or "pending",
+                    results_count=int(r[4] or 0),
+                    error_message=r[5] or "",
+                    created_at=to_kst(r[6]),
+                    started_at=to_kst(r[7]),
+                    completed_at=to_kst(r[8]),
+                )
+            )
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.error(f"Crawling jobs fetch error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/logs", response_model=List[LogEntry], dependencies=[Depends(require_admin)])
@@ -531,7 +668,8 @@ async def get_logs(limit: int = 50):
                 rag_confidence=float(log['rag_confidence']) if log['rag_confidence'] else 0.0,
                 processing_time=float(log['processing_time']) if log['processing_time'] else 0.0,
                 advice_quality=log['advice_quality'],
-                image_uploaded=bool(log['image_uploaded'])
+                image_uploaded=bool(log['image_uploaded']),
+                image_path=log.get('image_path', '')
             )
             for log in logs
         ]
