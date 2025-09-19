@@ -102,8 +102,9 @@ docker-compose up -d
 
 - **메인 페이지**: http://localhost:8000
 - **API 문서**: http://localhost:8000/docs
-- **관리자 대시보드**: http://localhost:8000/admin
+- **관리자 대시보드**: http://localhost:8000/admin (HTTP Basic, `.env`의 `ADMIN_USER`/`ADMIN_PASS`)
 - **헬스 체크**: http://localhost:8000/api/health
+- (배포 예시) EC2 퍼블릭: `http://ec2-3-16-111-189.us-east-2.compute.amazonaws.com`
 
 ## 🔧 API 엔드포인트
 
@@ -114,6 +115,7 @@ docker-compose up -d
 ### 관리자 API
 - `GET /api/logs`: 증상 로그 조회
 - `GET /api/stats`: 시스템 통계
+- `GET /api/crawling_jobs`: 크롤링 작업 로그 (KST 변환 적용)
 - `WebSocket /ws/logs`: 실시간 로그 스트리밍
 
 ## 📊 모니터링
@@ -192,6 +194,14 @@ spec:
 - 민감한 정보는 환경 변수로 관리
 - Docker Secrets 사용
 - Kubernetes Secrets 활용
+
+### 관리자 인증(HTTP Basic)
+- `.env`에 `ADMIN_USER`, `ADMIN_PASS` 설정 필수
+- 예: `ADMIN_USER=admin`, `ADMIN_PASS=<your-secure-password>`
+
+## 🕒 시간대 정책
+- API와 관리자 UI에서 노출되는 시간은 KST(Asia/Seoul) 기준으로 변환되어 표시됩니다.
+- `/api/logs`, `/api/crawling_jobs`, `/api/health`의 `timestamp` 필드 확인.
 
 ## 📈 성능 최적화
 

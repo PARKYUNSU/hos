@@ -64,6 +64,115 @@ python scheduler.py
 - Streamlit Cloud Secrets 확인
 - 로컬 `.env` 파일 확인
 
+## FastAPI + Nginx + systemd (EC2) 배포 요약
+
+### 1) 시스템 준비
+```bash
+sudo apt update && sudo apt install -y nginx
+# (옵션) swap 구성 권장
+```
+
+### 2) Miniconda/Conda 환경
+```bash
+curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o miniconda.sh
+bash miniconda.sh -b -p "$HOME/miniconda"
+source "$HOME/miniconda/etc/profile.d/conda.sh"
+conda create -y -n hos python=3.11
+conda activate hos
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+pip install -r requirements.txt
+python -m playwright install chromium --with-deps || true
+```
+
+### 3) 환경 변수(.env)
+```env
+OPENAI_API_KEY=sk-...
+ADMIN_USER=admin
+ADMIN_PASS=<your-secure-password>
+FAST_MODE=0
+USE_PLAYWRIGHT_CRAWLING=1
+PW_HEADLESS=1
+PW_WAIT_UNTIL=networkidle
+DISABLE_POI=1
+POI_TIMEOUT_SEC=6
+RAG_TFIDF_MAX_FEATURES=4000
+RAG_MAX_PASSAGES=200
+RAG_USE_RAG_DATA=0
+OPENAI_MAX_TOKENS=900
+OPENAI_TIMEOUT_SECONDS=15
+MVP_RANDOM_TOKYO=true
+MVP_FIXED_SHINJUKU=true
+```
+
+### 4) systemd 서비스
+`/etc/systemd/system/hos.service`
+```ini
+[Unit]
+Description=HOS FastAPI (uvicorn)
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/hos
+EnvironmentFile=/home/ubuntu/hos/.env
+ExecStart=/home/ubuntu/miniconda/envs/hos/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable hos --now
+```
+
+### 5) Nginx 리버스 프록시
+`/etc/nginx/sites-available/hos`
+```nginx
+server {
+    listen 80;
+    server_name _;
+    client_max_body_size 10M;
+
+    location /static/ {
+        alias /var/www/hos/static/;
+        access_log off;
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800";
+    }
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_connect_timeout 60s;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+}
+```
+```bash
+sudo ln -sf /etc/nginx/sites-available/hos /etc/nginx/sites-enabled/hos
+sudo mkdir -p /var/www/hos/static
+sudo rsync -a /home/ubuntu/hos/static/ /var/www/hos/static/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### 6) 헬스 체크
+```bash
+curl -sS http://127.0.0.1:8000/api/health
+curl -sS http://<EC2-PUBLIC-DNS>/api/health
+```
+
+### 7) 운영 팁
+- 관리자 대시보드는 HTTP Basic으로 보호됩니다 (`ADMIN_USER`/`ADMIN_PASS`).
+- 모든 로그/대시보드 시간은 KST(Asia/Seoul) 기준으로 표기됩니다.
+- 413 업로드 제한은 `client_max_body_size`로 조정합니다(예: 10M).
+
 ## 성능 최적화
 
 ### 1. 배포용 설정

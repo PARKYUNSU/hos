@@ -79,8 +79,8 @@ uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 - **시스템 설정**: 환경변수 및 데이터베이스 관리
 
 ### 접속
-- URL: `http://localhost:8502`
-- 포트: 8502
+- 관리자: `http://localhost:8000/admin` (HTTP Basic, `.env`의 `ADMIN_USER`/`ADMIN_PASS`)
+- 시간대: 모든 로그/대시보드 표시는 KST(Asia/Seoul)
 
 ## 🔄 자동화 시스템
 
