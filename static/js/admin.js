@@ -342,10 +342,11 @@ async function loadSettings() {
                     <input type="file" id="restoreFile" accept="application/json" class="form-control form-control-sm mt-2" onchange="restoreOtcRules(event)">
                 </div>
                 <textarea id="otcRulesEditor" class="form-control" rows="14" placeholder="JSON 규칙"></textarea>
-                <small class="text-muted">PMDA/RAD-AR 기준을 반영한 규칙 JSON을 직접 수정/백업/복구할 수 있습니다.</small>
+                <small class="text-muted">PMDA/RAD-AR/FDA 기준을 반영한 규칙 JSON을 직접 수정/백업/복구할 수 있습니다.</small>
             </div>
         </div>
     `;
+    try { await loadOtcRules(); } catch (e) {}
 }
 
 // 크롤링 작업 로드 (DB 기반 뷰)
